@@ -23,6 +23,18 @@ body="$(jq -cn --arg machine "$NOTCH_MACHINE" --arg agent "claude-code" --argjso
 
 auth=(-H "Authorization: Bearer $NOTCH_TOKEN" -H "Content-Type: application/json")
 
+# Respect the session's permission mode: only gate tools Claude Code itself would
+# prompt for. Bypass/auto/dontAsk sessions are monitor-only; acceptEdits skips
+# the gate for edit tools but still gates Bash and plans.
+if [ "$MODE" = "permission" ]; then
+  pm="$(jq -r '.permission_mode // "default"' <<<"$payload" 2>/dev/null)"
+  tool="$(jq -r '.tool_name // ""' <<<"$payload" 2>/dev/null)"
+  case "$pm" in
+    bypassPermissions|auto|dontAsk) MODE="event" ;;
+    acceptEdits) case "$tool" in Edit|Write|MultiEdit) MODE="event" ;; esac ;;
+  esac
+fi
+
 if [ "$MODE" = "permission" ] && [ "$NOTCH_REMOTE_APPROVE" != "0" ]; then
   resp="$(curl -sS -m 3 "${auth[@]}" -d "$body" "$NOTCH_SERVER/api/permissions" 2>/dev/null)" || exit 0
   id="$(jq -r '.id // empty' <<<"$resp" 2>/dev/null)"
