@@ -24,6 +24,7 @@ struct MenuContent: View {
         Divider()
         Button("Show sessions") { model.requestExpand?() }
         Button("Reconnect") { model.connect() }
+        Toggle("Sound Alerts", isOn: $model.soundEnabled)
         // Registration only works from an installed .app bundle, not `swift run`.
         if Bundle.main.bundlePath.hasSuffix(".app") {
             Toggle("Launch at Login", isOn: $launchAtLogin)

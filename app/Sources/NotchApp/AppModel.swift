@@ -11,6 +11,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var pendingPermissions: [String: PermissionRequest] = [:]
     @Published private(set) var connection: ConnectionState = .disconnected
     @Published private(set) var serverDescription = ""
+    @Published var soundEnabled: Bool = UserDefaults.standard.object(forKey: "soundEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(soundEnabled, forKey: "soundEnabled") }
+    }
 
     /// Wired by AppDelegate to control the notch panel.
     var requestExpand: (() -> Void)?
@@ -156,7 +159,7 @@ final class AppModel: ObservableObject {
     }
 
     private func alert() {
-        NSSound(named: "Glass")?.play()
+        if soundEnabled { NSSound(named: "Glass")?.play() }
         onAttention?(true)
     }
 

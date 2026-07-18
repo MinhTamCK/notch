@@ -225,6 +225,15 @@ struct ExpandedView: View {
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
             Spacer()
+            Button {
+                model.soundEnabled.toggle()
+            } label: {
+                Image(systemName: model.soundEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                    .font(.caption)
+                    .foregroundStyle(model.soundEnabled ? Color.secondary : Color.orange)
+            }
+            .buttonStyle(.plain)
+            .help(model.soundEnabled ? "Mute alerts" : "Unmute alerts")
             Circle()
                 .fill(model.connection == .connected ? .green : .red)
                 .frame(width: 6, height: 6)
