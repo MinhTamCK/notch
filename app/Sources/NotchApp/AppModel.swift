@@ -134,7 +134,12 @@ final class AppModel: ObservableObject {
         case "snapshot":
             sessions = Dictionary(uniqueKeysWithValues: (message.sessions ?? []).map { ($0.key, $0) })
             pendingPermissions = Dictionary(uniqueKeysWithValues: (message.permissions ?? []).map { ($0.id, $0) })
-            onAttention?(attentionCount > 0)
+            // Alert (not just expand) so attention that arrived while disconnected isn't silent.
+            if attentionCount > 0 {
+                alert()
+            } else {
+                onAttention?(false)
+            }
         case "session":
             guard let session = message.session else { return }
             let previous = sessions[session.key]?.state

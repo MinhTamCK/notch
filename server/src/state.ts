@@ -22,7 +22,7 @@ export interface Session {
   lastMessage?: string
   startedAt: number
   updatedAt: number
-  pendingPermissionId?: string
+  pendingPermissionIds: string[]
 }
 
 export type Decision = 'allow' | 'deny' | 'timeout'
@@ -64,6 +64,9 @@ export type ChangeMessage =
 
 const STALE_AFTER_MS = 15 * 60 * 1000
 const RETAIN_FINISHED_MS = 6 * 60 * 60 * 1000
+// Hooks long-poll for 55s; anything older than this was abandoned (hook died
+// before polling) and would otherwise leave a stuck approval card.
+const PERMISSION_EXPIRY_MS = 90 * 1000
 const ACTIVE_STATES: SessionState[] = ['working', 'needs_permission', 'needs_attention']
 
 function trunc(s: unknown, n: number): string | undefined {
@@ -123,6 +126,7 @@ export class Store {
         state: 'working',
         startedAt: Date.now(),
         updatedAt: Date.now(),
+        pendingPermissionIds: [],
       }
       this.sessions.set(key, s)
     }
@@ -131,9 +135,10 @@ export class Store {
   }
 
   private hasPendingPermission(s: Session): boolean {
-    if (!s.pendingPermissionId) return false
-    const req = this.permissions.get(s.pendingPermissionId)
-    return !!req && !req.decision
+    return s.pendingPermissionIds.some(id => {
+      const req = this.permissions.get(id)
+      return !!req && !req.decision
+    })
   }
 
   handleEvent(env: HookEnvelope): Session | undefined {
@@ -186,7 +191,7 @@ export class Store {
     }
     this.permissions.set(req.id, req)
     s.state = 'needs_permission'
-    s.pendingPermissionId = req.id
+    s.pendingPermissionIds.push(req.id)
     s.lastTool = describeTool(req.toolName, env.event.tool_input)
     s.updatedAt = Date.now()
     this.emit({ type: 'permission', request: req })
@@ -203,10 +208,13 @@ export class Store {
     this.log('permission_decision', { id, decision, reason })
 
     const s = this.sessions.get(`${req.machine}:${req.sessionId}`)
-    if (s && s.pendingPermissionId === id) {
-      s.pendingPermissionId = undefined
-      // On timeout the hook falls back to the terminal prompt, so the user is needed there.
-      s.state = decision === 'timeout' ? 'needs_attention' : 'working'
+    if (s && s.pendingPermissionIds.includes(id)) {
+      s.pendingPermissionIds = s.pendingPermissionIds.filter(p => p !== id)
+      // Only leave needs_permission once every queued request is resolved.
+      if (!this.hasPendingPermission(s)) {
+        // On timeout the hook falls back to the terminal prompt, so the user is needed there.
+        s.state = decision === 'timeout' ? 'needs_attention' : 'working'
+      }
       s.updatedAt = Date.now()
       this.emit({ type: 'session', session: s })
     }
@@ -235,6 +243,15 @@ export class Store {
   }
 
   sweepStale() {
+    // Expire abandoned permission requests (hook died before long-polling) so
+    // approval cards can't get stuck.
+    const permCutoff = Date.now() - PERMISSION_EXPIRY_MS
+    for (const req of this.permissions.values()) {
+      if (!req.decision && req.createdAt < permCutoff) {
+        this.decide(req.id, 'timeout', 'Expired unanswered')
+      }
+    }
+
     const cutoff = Date.now() - STALE_AFTER_MS
     for (const s of this.sessions.values()) {
       if (ACTIVE_STATES.includes(s.state) && s.updatedAt < cutoff) {

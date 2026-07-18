@@ -22,7 +22,6 @@ struct Session: Codable, Identifiable, Equatable {
     let lastMessage: String?
     let startedAt: Double
     let updatedAt: Double
-    let pendingPermissionId: String?
 
     var id: String { key }
     var projectName: String {
