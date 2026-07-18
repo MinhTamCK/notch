@@ -4,6 +4,7 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+[ -f "$HOME/.notch/env" ] && . "$HOME/.notch/env"
 export NOTCH_SERVER="${NOTCH_SERVER:-http://localhost:4519}"
 export NOTCH_TOKEN="${NOTCH_TOKEN:-dev-token}"
 HOOK="$ROOT/hooks/notch-hook.sh"

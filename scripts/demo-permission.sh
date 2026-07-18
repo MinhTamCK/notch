@@ -4,6 +4,7 @@
 set -u
 
 KIND="${1:-bash}"
+[ -f "$HOME/.notch/env" ] && . "$HOME/.notch/env"
 SERVER="${NOTCH_SERVER:-http://localhost:4519}"
 TOKEN="${NOTCH_TOKEN:-dev-token}"
 AUTH=(-H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json")

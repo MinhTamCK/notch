@@ -1,5 +1,6 @@
 import AppKit
 import DynamicNotchKit
+import ServiceManagement
 import SwiftUI
 
 @main
@@ -15,6 +16,7 @@ struct NotchApp: App {
 
 struct MenuContent: View {
     @ObservedObject var model: AppModel
+    @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
 
     var body: some View {
         Text("\(model.connection.rawValue) — \(model.serverDescription)")
@@ -22,6 +24,21 @@ struct MenuContent: View {
         Divider()
         Button("Show sessions") { model.requestExpand?() }
         Button("Reconnect") { model.connect() }
+        // Registration only works from an installed .app bundle, not `swift run`.
+        if Bundle.main.bundlePath.hasSuffix(".app") {
+            Toggle("Launch at Login", isOn: $launchAtLogin)
+                .onChange(of: launchAtLogin) { _, enable in
+                    do {
+                        if enable {
+                            try SMAppService.mainApp.register()
+                        } else {
+                            try SMAppService.mainApp.unregister()
+                        }
+                    } catch {
+                        launchAtLogin = SMAppService.mainApp.status == .enabled
+                    }
+                }
+        }
         Divider()
         Button("Quit Notch") { NSApp.terminate(nil) }
     }
