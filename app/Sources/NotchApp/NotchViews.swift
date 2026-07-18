@@ -109,6 +109,16 @@ struct ExpandedView: View {
                 .buttonStyle(.plain)
             }
 
+            let pending = model.pendingPermissions.values.sorted { $0.createdAt < $1.createdAt }
+            if !pending.isEmpty {
+                VStack(spacing: 8) {
+                    ForEach(pending) { request in
+                        PermissionCard(request: request, model: model)
+                    }
+                }
+                Divider()
+            }
+
             if model.visibleSessions.isEmpty {
                 Text("No active sessions")
                     .font(.callout)
@@ -134,6 +144,69 @@ struct ExpandedView: View {
         }
         .padding(12)
         .frame(width: 380)
+    }
+}
+
+struct PermissionCard: View {
+    let request: PermissionRequest
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: request.isPlan ? "list.clipboard.fill" : "hand.raised.fill")
+                    .foregroundStyle(.orange)
+                Text("\(request.machine) · \(request.projectName)")
+                    .font(.callout)
+                    .fontWeight(.semibold)
+                Spacer()
+                Text(request.isPlan ? "Plan" : request.toolName)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let detail = request.detail {
+                if request.isPlan {
+                    ScrollView {
+                        Text(planText(detail))
+                            .font(.caption)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxHeight: 180)
+                    .padding(6)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(.white.opacity(0.07)))
+                } else {
+                    Text(detail)
+                        .font(.system(.caption, design: .monospaced))
+                        .lineLimit(6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(6)
+                        .background(RoundedRectangle(cornerRadius: 6).fill(.white.opacity(0.07)))
+                }
+            }
+
+            HStack {
+                Button("Deny") { model.decide(request.id, decision: "deny") }
+                    .buttonStyle(.bordered)
+                    .tint(.red)
+                Spacer()
+                Button(request.isPlan ? "Approve plan" : "Approve") {
+                    model.decide(request.id, decision: "allow")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.green)
+            }
+            .controlSize(.small)
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 8).fill(.orange.opacity(0.12)))
+    }
+
+    private func planText(_ markdown: String) -> AttributedString {
+        (try? AttributedString(
+            markdown: markdown,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        )) ?? AttributedString(markdown)
     }
 }
 

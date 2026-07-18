@@ -156,4 +156,21 @@ final class AppModel: ObservableObject {
         NSSound(named: "Glass")?.play()
         onAttention?(true)
     }
+
+    // MARK: Decisions
+
+    func decide(_ id: String, decision: String) {
+        // Optimistic removal; the server's permission_resolved broadcast confirms it.
+        pendingPermissions.removeValue(forKey: id)
+        let payload: [String: String] = [
+            "type": "decide",
+            "id": id,
+            "decision": decision,
+            "reason": "Decided via Notch app",
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let text = String(data: data, encoding: .utf8)
+        else { return }
+        task?.send(.string(text)) { _ in }
+    }
 }
