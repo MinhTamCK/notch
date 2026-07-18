@@ -126,4 +126,5 @@ struct ServerMessage: Decodable {
     let request: PermissionRequest?
     let id: String?
     let decision: String?
+    let key: String?
 }

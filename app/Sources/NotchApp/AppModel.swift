@@ -147,6 +147,9 @@ final class AppModel: ObservableObject {
         case "permission_resolved":
             guard let id = message.id else { return }
             pendingPermissions.removeValue(forKey: id)
+        case "session_removed":
+            guard let key = message.key else { return }
+            sessions.removeValue(forKey: key)
         default:
             break
         }

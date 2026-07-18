@@ -58,10 +58,12 @@ export interface HookEnvelope {
 
 export type ChangeMessage =
   | { type: 'session'; session: Session }
+  | { type: 'session_removed'; key: string }
   | { type: 'permission'; request: PermissionRequest }
   | { type: 'permission_resolved'; id: string; decision: Decision; reason?: string }
 
 const STALE_AFTER_MS = 15 * 60 * 1000
+const RETAIN_FINISHED_MS = 6 * 60 * 60 * 1000
 const ACTIVE_STATES: SessionState[] = ['working', 'needs_permission', 'needs_attention']
 
 function trunc(s: unknown, n: number): string | undefined {
@@ -239,6 +241,14 @@ export class Store {
         s.state = 'stale'
         s.updatedAt = Date.now()
         this.emit({ type: 'session', session: s })
+      }
+    }
+    // Prune finished sessions so they don't accumulate forever.
+    const retainCutoff = Date.now() - RETAIN_FINISHED_MS
+    for (const [key, s] of this.sessions) {
+      if (!ACTIVE_STATES.includes(s.state) && s.updatedAt < retainCutoff) {
+        this.sessions.delete(key)
+        this.emit({ type: 'session_removed', key })
       }
     }
   }
