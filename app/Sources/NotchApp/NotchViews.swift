@@ -173,7 +173,7 @@ struct ExpandedView: View {
                     .padding(.vertical, 14)
             } else {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 6) {
+                    LazyVStack(alignment: .leading, spacing: 6) {
                         ForEach(machines, id: \.name) { machine in
                             Text(machine.name.uppercased())
                                 .font(.system(size: 9, weight: .bold))

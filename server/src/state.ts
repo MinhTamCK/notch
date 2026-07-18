@@ -62,8 +62,9 @@ export type ChangeMessage =
   | { type: 'permission'; request: PermissionRequest }
   | { type: 'permission_resolved'; id: string; decision: Decision; reason?: string }
 
-const STALE_AFTER_MS = 15 * 60 * 1000
-const RETAIN_FINISHED_MS = 6 * 60 * 60 * 1000
+// Configurable via ~/.notch/env: NOTCH_STALE_MINUTES / NOTCH_RETAIN_HOURS.
+const STALE_AFTER_MS = (Number(process.env.NOTCH_STALE_MINUTES) || 15) * 60 * 1000
+const RETAIN_FINISHED_MS = (Number(process.env.NOTCH_RETAIN_HOURS) || 6) * 60 * 60 * 1000
 // Hooks long-poll for 55s; anything older than this was abandoned (hook died
 // before polling) and would otherwise leave a stuck approval card.
 const PERMISSION_EXPIRY_MS = 90 * 1000
@@ -72,6 +73,18 @@ const ACTIVE_STATES: SessionState[] = ['working', 'needs_permission', 'needs_att
 function trunc(s: unknown, n: number): string | undefined {
   if (typeof s !== 'string' || s.length === 0) return undefined
   return s.length > n ? s.slice(0, n) + '…' : s
+}
+
+/// Slash-command invocations arrive as XML-ish wrappers; show the command itself
+/// instead of raw markup. Ordinary prompts pass through untouched.
+function cleanPrompt(p: unknown): string | undefined {
+  if (typeof p !== 'string') return undefined
+  const cmd = p.match(/<command-name>([^<]+)<\/command-name>/)
+  if (cmd) {
+    const args = p.match(/<command-args>([^<]*)<\/command-args>/)
+    return trunc(`${cmd[1].trim()} ${args?.[1]?.trim() ?? ''}`.trim(), 200)
+  }
+  return trunc(p, 200)
 }
 
 function describeTool(name: string, input?: Record<string, unknown>): string {
@@ -151,7 +164,7 @@ export class Store {
         break
       case 'UserPromptSubmit':
         s.state = 'working'
-        s.lastMessage = trunc(env.event.prompt, 200)
+        s.lastMessage = cleanPrompt(env.event.prompt)
         break
       case 'PreToolUse':
       case 'PostToolUse':

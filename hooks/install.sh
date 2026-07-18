@@ -40,6 +40,7 @@ jq --arg ev "$HOOK_CMD_EVENT" --arg perm "$HOOK_CMD_PERM" '
   | .hooks.SessionStart      = (((.hooks.SessionStart // [])      | strip) + [{hooks: [{type: "command", command: $ev}]}])
   | .hooks.UserPromptSubmit  = (((.hooks.UserPromptSubmit // [])  | strip) + [{hooks: [{type: "command", command: $ev}]}])
   | .hooks.Notification      = (((.hooks.Notification // [])      | strip) + [{hooks: [{type: "command", command: $ev}]}])
+  | .hooks.PostToolUse       = (((.hooks.PostToolUse // [])       | strip) + [{hooks: [{type: "command", command: $ev}]}])
   | .hooks.Stop              = (((.hooks.Stop // [])              | strip) + [{hooks: [{type: "command", command: $ev}]}])
   | .hooks.SessionEnd        = (((.hooks.SessionEnd // [])        | strip) + [{hooks: [{type: "command", command: $ev}]}])
   | .hooks.PreToolUse        = (((.hooks.PreToolUse // [])        | strip) + [{matcher: "Bash|Write|Edit|MultiEdit|ExitPlanMode", hooks: [{type: "command", command: $perm, timeout: 60}]}])

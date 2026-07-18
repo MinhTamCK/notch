@@ -36,7 +36,7 @@ cat > "$PLIST" <<EOF
   <array>
     <string>/bin/sh</string>
     <string>-c</string>
-    <string>. "\$HOME/.notch/env"; export NOTCH_TOKEN NOTCH_PORT; cd "$SERVER_DIR"; exec "$NODE_BIN" node_modules/.bin/tsx src/index.ts</string>
+    <string>. "\$HOME/.notch/env"; export NOTCH_TOKEN NOTCH_PORT NOTCH_STALE_MINUTES NOTCH_RETAIN_HOURS; cd "$SERVER_DIR"; exec "$NODE_BIN" node_modules/.bin/tsx src/index.ts</string>
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
@@ -47,6 +47,7 @@ cat > "$PLIST" <<EOF
 EOF
 
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+sleep 1  # let launchd settle; immediate re-bootstrap can fail with EIO
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
 launchctl kickstart -k "gui/$(id -u)/$LABEL"
 

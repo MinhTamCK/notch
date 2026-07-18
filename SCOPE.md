@@ -50,6 +50,9 @@ Bonus: `ExitPlanMode` is also a `PreToolUse` event whose `tool_input` contains t
 markdown → **remote plan preview + plan approval** comes for free.
 
 Caveats (accepted for v1):
+- Plan approvals via hook `allow`: what permission mode the session enters afterward is
+  Claude Code internal behavior — not controllable from hook output (docs confirm no field
+  exists). If a remotely-approved plan lands in an unexpected mode, that's upstream.
 - Hook matcher scoped to `Bash|Write|Edit|MultiEdit|ExitPlanMode` so cheap read-only tools
   don't round-trip to the server.
 - Matched tools that the VM's allowlist would have auto-approved still wait on the remote

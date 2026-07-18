@@ -65,6 +65,7 @@ final class AppModel: ObservableObject {
         serverDescription = config.server
         guard var components = URLComponents(string: config.server) else {
             connection = .disconnected
+            retryConnectLater()
             return
         }
         components.scheme = components.scheme == "https" ? "wss" : "ws"
@@ -72,6 +73,7 @@ final class AppModel: ObservableObject {
         components.queryItems = [URLQueryItem(name: "token", value: config.token)]
         guard let url = components.url else {
             connection = .disconnected
+            retryConnectLater()
             return
         }
 
@@ -107,6 +109,16 @@ final class AppModel: ObservableObject {
                     self.receive(on: socket)
                 }
             }
+        }
+    }
+
+    /// Retries connect() when config was unusable — self-heals once ~/.notch/env is fixed.
+    private func retryConnectLater() {
+        reconnectTask?.cancel()
+        reconnectTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            self?.connect()
         }
     }
 

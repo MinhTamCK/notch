@@ -52,6 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var autoExpanded = false
     private var isExpanded = false
     private var clickMonitor: Any?
+    private var compactDebounce: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -66,21 +67,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         }
 
         model.requestExpand = { [weak self] in
+            self?.compactDebounce?.cancel()
             self?.autoExpanded = false
             self?.setNotch(expanded: true)
         }
         model.requestCompact = { [weak self] in
+            self?.compactDebounce?.cancel()
             self?.autoExpanded = false
             self?.setNotch(expanded: false)
         }
         model.onAttention = { [weak self] hasAttention in
             guard let self else { return }
             if hasAttention {
+                self.compactDebounce?.cancel()
                 self.autoExpanded = true
                 self.setNotch(expanded: true)
             } else if self.autoExpanded {
-                self.autoExpanded = false
-                self.setNotch(expanded: false)
+                // Debounce auto-collapse so back-to-back approvals don't flicker the panel.
+                self.compactDebounce?.cancel()
+                self.compactDebounce = Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(2.5))
+                    guard !Task.isCancelled, let self, self.autoExpanded else { return }
+                    self.autoExpanded = false
+                    self.setNotch(expanded: false)
+                }
             }
         }
 
