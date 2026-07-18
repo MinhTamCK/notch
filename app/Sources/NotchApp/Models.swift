@@ -99,6 +99,23 @@ struct PermissionRequest: Codable, Identifiable, Equatable {
         default: return nil
         }
     }
+
+    var filePath: String? { toolInput?["file_path"]?.stringValue }
+
+    /// Old/new lines for Edit requests, so the card can render a real diff.
+    var editDiff: (removed: [String], added: [String])? {
+        guard toolName == "Edit",
+              let old = toolInput?["old_string"]?.stringValue,
+              let new = toolInput?["new_string"]?.stringValue
+        else { return nil }
+        return (old.components(separatedBy: "\n"), new.components(separatedBy: "\n"))
+    }
+
+    /// Content lines for Write requests (all lines are additions).
+    var writeContent: [String]? {
+        guard toolName == "Write" else { return nil }
+        return toolInput?["content"]?.stringValue?.components(separatedBy: "\n")
+    }
 }
 
 struct ServerMessage: Decodable {
