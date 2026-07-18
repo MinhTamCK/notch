@@ -96,8 +96,7 @@ struct CompactLeadingView: View {
                 .monospacedDigit()
                 .foregroundStyle(model.workingCount > 0 ? .white : .secondary)
         }
-        .contentShape(Rectangle())
-        .onTapGesture { model.requestExpand?() }
+        // Expansion is handled by the app-wide click monitor covering the whole notch.
     }
 }
 
@@ -125,8 +124,6 @@ struct CompactTrailingView: View {
             }
         }
         .font(.caption)
-        .contentShape(Rectangle())
-        .onTapGesture { model.requestExpand?() }
     }
 }
 
@@ -205,6 +202,9 @@ struct ExpandedView: View {
         }
         .padding(14)
         .frame(width: 400)
+        .contentShape(Rectangle())
+        // Tap anywhere in the panel to collapse; buttons and links still win.
+        .onTapGesture { model.requestCompact?() }
         .animation(panelSpring, value: model.pendingPermissions)
         .animation(panelSpring, value: model.sessions)
         .onChange(of: pending.isEmpty) { _, isEmpty in

@@ -30,8 +30,10 @@ struct MenuContent: View {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     let model = AppModel()
-    private var notch: (any DynamicNotchControllable)?
+    private var notch: DynamicNotch<ExpandedView, CompactLeadingView, CompactTrailingView>?
     private var autoExpanded = false
+    private var isExpanded = false
+    private var clickMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -64,12 +66,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             }
         }
 
+        // Any click on the notch surface toggles it — not just the small controls.
+        clickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
+            self?.handleClick(event) ?? event
+        }
+
         model.connect()
         setNotch(expanded: false)
     }
 
+    /// Returns nil to swallow the event when it toggled the notch.
+    private func handleClick(_ event: NSEvent) -> NSEvent? {
+        guard let panel = notch?.windowController?.window, event.window === panel else { return event }
+        if !isExpanded {
+            autoExpanded = false
+            setNotch(expanded: true)
+            return nil
+        }
+        // Expanded: a click on the black notch strip along the top collapses.
+        let screenPoint = panel.convertPoint(toScreen: event.locationInWindow)
+        if let screen = panel.screen ?? NSScreen.screens.first,
+           screen.frame.maxY - screenPoint.y <= 44 {
+            autoExpanded = false
+            setNotch(expanded: false)
+            return nil
+        }
+        return event
+    }
+
     private func setNotch(expanded: Bool) {
         guard let notch, let screen = NSScreen.screens.first else { return }
+        isExpanded = expanded
         Task { @MainActor in
             if expanded {
                 await notch.expand(on: screen)
