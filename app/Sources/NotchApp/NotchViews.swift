@@ -237,14 +237,6 @@ struct ExpandedView: View {
             Circle()
                 .fill(model.connection == .connected ? .green : .red)
                 .frame(width: 6, height: 6)
-            Button {
-                model.requestCompact?()
-            } label: {
-                Image(systemName: "chevron.up")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
         }
     }
 }
