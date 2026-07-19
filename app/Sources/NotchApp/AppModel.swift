@@ -39,6 +39,8 @@ final class AppModel: ObservableObject {
     var requestExpand: (() -> Void)?
     var requestCompact: (() -> Void)?
     var onAttention: ((_ hasAttention: Bool) -> Void)?
+    /// Fired after the user resolves a permission and nothing else needs them.
+    var onAllResolved: (() -> Void)?
 
     private var task: URLSessionWebSocketTask?
     private var reconnectTask: Task<Void, Never>?
@@ -365,20 +367,24 @@ final class AppModel: ObservableObject {
     func decide(_ id: String, decision: String) {
         if mode == .hosting {
             _ = localDecide(id, decision: decision, reason: "Decided via Notch app")
-            return
+        } else {
+            // Client mode: optimistic removal; the server's broadcast confirms it.
+            pendingPermissions.removeValue(forKey: id)
+            let payload: [String: String] = [
+                "type": "decide",
+                "id": id,
+                "decision": decision,
+                "reason": "Decided via Notch app",
+            ]
+            if let data = try? JSONSerialization.data(withJSONObject: payload),
+               let text = String(data: data, encoding: .utf8) {
+                task?.send(.string(text)) { _ in }
+            }
         }
-        // Client mode: optimistic removal; the server's broadcast confirms it.
-        pendingPermissions.removeValue(forKey: id)
-        let payload: [String: String] = [
-            "type": "decide",
-            "id": id,
-            "decision": decision,
-            "reason": "Decided via Notch app",
-        ]
-        guard let data = try? JSONSerialization.data(withJSONObject: payload),
-              let text = String(data: data, encoding: .utf8)
-        else { return }
-        task?.send(.string(text)) { _ in }
+        // The user just cleared the last thing needing them — let the panel tuck away.
+        if pendingPermissions.isEmpty && attentionCount == 0 {
+            onAllResolved?()
+        }
     }
 
     // MARK: - Hosting-mode store (port of the Node server's state machine)

@@ -43,6 +43,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             self?.autoExpanded = false
             self?.setNotch(expanded: false)
         }
+        model.onAllResolved = { [weak self] in
+            guard let self, self.isExpanded else { return }
+            // Collapse shortly after the final decision, so the card animates out first.
+            self.compactDebounce?.cancel()
+            self.compactDebounce = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(0.6))
+                guard !Task.isCancelled, let self, self.isExpanded else { return }
+                self.autoExpanded = false
+                self.setNotch(expanded: false)
+            }
+        }
         model.onAttention = { [weak self] hasAttention in
             guard let self else { return }
             if hasAttention {
