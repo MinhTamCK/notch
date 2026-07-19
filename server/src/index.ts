@@ -19,6 +19,23 @@ const store = new Store(dataDir)
 
 const app = new Hono()
 
+// Only loopback and the Tailscale tailnet (100.64.0.0/10, fd7a:115c:a1e0::/48)
+// may talk to the server — LAN and internet sources are rejected outright.
+export function allowedSource(ip: string | undefined): boolean {
+  if (!ip) return false
+  const v4 = ip.startsWith('::ffff:') ? ip.slice(7) : ip
+  if (v4 === '127.0.0.1' || ip === '::1') return true
+  if (ip.toLowerCase().startsWith('fd7a:115c:a1e0')) return true
+  const parts = v4.split('.').map(Number)
+  return parts.length === 4 && parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127
+}
+
+app.use('*', async (c, next) => {
+  const socket = (c.env as { incoming?: { socket?: { remoteAddress?: string } } })?.incoming?.socket
+  if (!allowedSource(socket?.remoteAddress)) return c.json({ error: 'forbidden' }, 403)
+  await next()
+})
+
 app.get('/health', c => c.json({ ok: true }))
 
 app.use('/api/*', async (c, next) => {
@@ -72,6 +89,7 @@ const server = serve({ fetch: app.fetch, port: PORT }, info => {
 const wss = new WebSocketServer({ noServer: true })
 
 server.on('upgrade', (req, socket, head) => {
+  if (!allowedSource(req.socket.remoteAddress)) return socket.destroy()
   const url = new URL(req.url ?? '', 'http://localhost')
   if (url.pathname !== '/ws') return socket.destroy()
   if (url.searchParams.get('token') !== TOKEN) {

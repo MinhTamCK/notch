@@ -339,6 +339,7 @@ struct SettingsSection: View {
     @State private var hooksInstalled = LocalSetup.isInstalled
     @State private var copied = false
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
+    @State private var tailscaleUp = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -376,19 +377,31 @@ struct SettingsSection: View {
             }
 
             if model.mode == .hosting {
-                settingRow(
-                    title: "Add remote machine",
-                    subtitle: "Paste the command in the remote shell"
-                ) {
-                    Button(copied ? "Copied ✓" : "Copy command") {
-                        RemoteAdd.copyToClipboard(token: model.token, port: model.hostedPort)
-                        copied = true
-                        Task {
-                            try? await Task.sleep(for: .seconds(2))
-                            copied = false
+                if tailscaleUp {
+                    settingRow(
+                        title: "Add remote machine",
+                        subtitle: "Via Tailscale (encrypted) — paste in the remote shell"
+                    ) {
+                        Button(copied ? "Copied ✓" : "Copy command") {
+                            RemoteAdd.copyToClipboard(token: model.token, port: model.hostedPort)
+                            copied = true
+                            Task {
+                                try? await Task.sleep(for: .seconds(2))
+                                copied = false
+                            }
                         }
+                        .buttonStyle(PillButtonStyle(prominent: true))
                     }
-                    .buttonStyle(PillButtonStyle(prominent: true))
+                } else {
+                    settingRow(
+                        title: "Add remote machine",
+                        subtitle: "Requires Tailscale — remote access is tailnet-only"
+                    ) {
+                        Button("Get Tailscale") {
+                            NSWorkspace.shared.open(URL(string: "https://tailscale.com/download")!)
+                        }
+                        .buttonStyle(PillButtonStyle())
+                    }
                 }
             } else {
                 settingRow(title: "Reconnect", subtitle: "Re-read ~/.notch/env and retry") {
@@ -427,7 +440,10 @@ struct SettingsSection: View {
             }
             .padding(.top, 2)
         }
-        .onAppear { model.checkForUpdates() }
+        .onAppear {
+            model.checkForUpdates()
+            tailscaleUp = RemoteAdd.tailscaleAddress() != nil
+        }
     }
 
     private func settingRow(

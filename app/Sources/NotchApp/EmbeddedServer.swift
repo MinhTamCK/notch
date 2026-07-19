@@ -31,8 +31,36 @@ final class EmbeddedServer {
 
     // MARK: Helpers
 
+    /// Only loopback and the Tailscale private network may talk to the server —
+    /// LAN and internet sources are rejected before auth is even considered.
+    static func allowedSource(_ request: HTTPRequest) -> Bool {
+        switch request.remoteAddress {
+        case .ip4(let ip, port: _):
+            return ip == "127.0.0.1" || isTailscaleIP4(ip)
+        case .ip6(let ip, port: _):
+            if ip == "::1" { return true }
+            if ip.lowercased().hasPrefix("fd7a:115c:a1e0") { return true } // Tailscale ULA
+            if let mapped = ip.split(separator: ":").last.map(String.init), ip.lowercased().contains("::ffff:") {
+                return mapped == "127.0.0.1" || isTailscaleIP4(mapped)
+            }
+            return false
+        case .unix:
+            return true
+        case nil:
+            return false
+        }
+    }
+
+    /// Tailscale hands out addresses from the CGNAT range 100.64.0.0/10.
+    private static func isTailscaleIP4(_ ip: String) -> Bool {
+        let parts = ip.split(separator: ".").compactMap { Int($0) }
+        guard parts.count == 4, parts[0] == 100 else { return false }
+        return (64...127).contains(parts[1])
+    }
+
     private func authorized(_ request: HTTPRequest) -> Bool {
-        request.headers[HTTPHeader("Authorization")] == "Bearer \(token)"
+        Self.allowedSource(request)
+            && request.headers[HTTPHeader("Authorization")] == "Bearer \(token)"
     }
 
     private func json(_ object: Any, status: HTTPStatusCode = .ok) -> HTTPResponse {
@@ -52,9 +80,10 @@ final class EmbeddedServer {
     private func addRoutes() async {
         let model = model
 
-        await server.appendRoute("GET /health") { _ in
-            HTTPResponse(statusCode: .ok, headers: [HTTPHeader("Content-Type"): "application/json"],
-                         body: Data(#"{"ok":true}"#.utf8))
+        await server.appendRoute("GET /health") { request in
+            guard Self.allowedSource(request) else { return HTTPResponse(statusCode: .forbidden) }
+            return HTTPResponse(statusCode: .ok, headers: [HTTPHeader("Content-Type"): "application/json"],
+                                body: Data(#"{"ok":true}"#.utf8))
         }
 
         await server.appendRoute("POST /api/events") { [weak self] request in
@@ -123,7 +152,7 @@ final class EmbeddedServer {
 
         // One-liner remote install: curl -fsSL "http://<mac>:4519/install?token=…" | bash
         await server.appendRoute("GET /install?token=:token") { [weak self] request in
-            guard let self, request.routeParameters["token"] == self.token else {
+            guard let self, Self.allowedSource(request), request.routeParameters["token"] == self.token else {
                 return HTTPResponse(statusCode: .notFound)
             }
             let host = request.headers[HTTPHeader("Host")] ?? "localhost:\(self.port)"
@@ -135,7 +164,7 @@ final class EmbeddedServer {
         }
 
         await server.appendRoute("GET /install/hook?token=:token") { [weak self] request in
-            guard let self, request.routeParameters["token"] == self.token else {
+            guard let self, Self.allowedSource(request), request.routeParameters["token"] == self.token else {
                 return HTTPResponse(statusCode: .notFound)
             }
             return HTTPResponse(statusCode: .ok, headers: [HTTPHeader("Content-Type"): "text/plain"],
@@ -256,24 +285,27 @@ enum LocalSetup {
 // MARK: - "Add Remote Machine" one-liner
 
 enum RemoteAdd {
-    static func command(token: String, port: UInt16) -> String {
-        let address = detectAddress()
-            ?? "\(ProcessInfo.processInfo.hostName.split(separator: ".").first ?? "mac").local"
+    /// Remote access is Tailscale-only: the server rejects non-tailnet sources,
+    /// so a LAN/public address in the command would never work anyway.
+    static func command(token: String, port: UInt16) -> String? {
+        guard let address = tailscaleAddress() else { return nil }
         return "curl -fsSL \"http://\(address):\(port)/install?token=\(token)\" | bash"
     }
 
-    static func copyToClipboard(token: String, port: UInt16) {
+    @discardableResult
+    static func copyToClipboard(token: String, port: UInt16) -> Bool {
+        guard let command = command(token: token, port: port) else { return false }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.setString(command(token: token, port: port), forType: .string)
+        pasteboard.setString(command, forType: .string)
+        return true
     }
 
-    /// Prefer the Tailscale address (works across networks), else the LAN IP.
-    private static func detectAddress() -> String? {
+    static func tailscaleAddress() -> String? {
         for tailscale in ["/usr/local/bin/tailscale", "/Applications/Tailscale.app/Contents/MacOS/Tailscale"] {
             if let out = run(tailscale, ["ip", "-4"]) { return out }
         }
-        return run("/usr/sbin/ipconfig", ["getifaddr", "en0"]) ?? run("/usr/sbin/ipconfig", ["getifaddr", "en1"])
+        return nil
     }
 
     private static func run(_ path: String, _ args: [String]) -> String? {
