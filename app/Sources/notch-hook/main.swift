@@ -6,6 +6,7 @@
 // Fails safe on every path: Claude Code falls back to its terminal prompt;
 // Cursor gets an explicit {"permission":"ask"} (it fails OPEN otherwise).
 import Foundation
+import NotchCore
 
 func loadEnvFile() -> [String: String] {
     let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".notch/env")
@@ -59,52 +60,8 @@ func request(_ method: String, _ path: String, body: [String: Any]?, timeout: Ti
     return result
 }
 
-/// Map Cursor's hook schema onto the Claude Code-shaped events the server speaks.
-/// Cursor splits one chat across multiple conversation ids (outer chat for
-/// prompt/stop, inner loop for tools), so we key sessions by WORKSPACE instead —
-/// one row per project, which is also how you think about Cursor.
 func translateCursor(_ raw: [String: Any]) -> [String: Any] {
-    var event: [String: Any] = [:]
-    let workspace = (raw["workspace_roots"] as? [String])?.first
-    event["session_id"] = workspace.map { "ws:\($0)" }
-        ?? raw["conversation_id"] as? String ?? raw["session_id"] as? String ?? "cursor"
-    event["cwd"] = workspace ?? raw["cwd"] as? String
-
-    switch raw["hook_event_name"] as? String {
-    case "sessionStart":
-        event["hook_event_name"] = "SessionStart"
-    case "beforeSubmitPrompt":
-        event["hook_event_name"] = "UserPromptSubmit"
-        event["prompt"] = raw["prompt"]
-    case "afterFileEdit":
-        event["hook_event_name"] = "PostToolUse"
-        event["tool_name"] = "Edit"
-        var toolInput: [String: Any] = ["file_path": raw["file_path"] ?? ""]
-        if let first = (raw["edits"] as? [[String: Any]])?.first {
-            toolInput["old_string"] = first["old_string"]
-            toolInput["new_string"] = first["new_string"]
-        }
-        event["tool_input"] = toolInput
-    case "preToolUse":
-        event["hook_event_name"] = "PreToolUse"
-        event["tool_name"] = raw["tool_name"]
-        event["tool_input"] = raw["tool_input"]
-    case "postToolUse":
-        event["hook_event_name"] = "PostToolUse"
-        event["tool_name"] = raw["tool_name"]
-        event["tool_input"] = raw["tool_input"]
-    case "beforeShellExecution":
-        event["hook_event_name"] = "PreToolUse"
-        event["tool_name"] = "Bash"
-        event["tool_input"] = ["command": raw["command"] ?? ""]
-    case "stop":
-        event["hook_event_name"] = "Stop"
-    case "sessionEnd":
-        event["hook_event_name"] = "SessionEnd"
-    default:
-        event["hook_event_name"] = raw["hook_event_name"] ?? "unknown"
-    }
-    return event
+    CursorTranslate.translate(raw)
 }
 
 let stdinData = FileHandle.standardInput.readDataToEndOfFile()

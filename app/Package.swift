@@ -10,9 +10,13 @@ let package = Package(
         .package(url: "https://github.com/swhitty/FlyingFox", from: "0.27.0"),
     ],
     targets: [
+        // Pure, testable logic shared by the app and the hook binary.
+        .target(name: "NotchCore"),
+        .testTarget(name: "NotchCoreTests", dependencies: ["NotchCore"]),
         .executableTarget(
             name: "NotchApp",
             dependencies: [
+                "NotchCore",
                 "DynamicNotchKit",
                 .product(name: "FlyingFox", package: "FlyingFox"),
             ],
@@ -20,6 +24,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "notch-hook",
+            dependencies: ["NotchCore"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
     ]

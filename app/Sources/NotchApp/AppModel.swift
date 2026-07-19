@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import NotchCore
 
 @MainActor
 final class AppModel: ObservableObject {
@@ -217,14 +218,7 @@ final class AppModel: ObservableObject {
     }
 
     nonisolated static func isNewer(_ a: String, than b: String) -> Bool {
-        let pa = a.split(separator: ".").map { Int($0) ?? 0 }
-        let pb = b.split(separator: ".").map { Int($0) ?? 0 }
-        for i in 0..<max(pa.count, pb.count) {
-            let x = i < pa.count ? pa[i] : 0
-            let y = i < pb.count ? pb[i] : 0
-            if x != y { return x > y }
-        }
-        return false
+        NotchCore.Version.isNewer(a, than: b)
     }
 
     nonisolated static func isHealthy(_ server: String) async -> Bool {

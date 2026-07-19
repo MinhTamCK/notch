@@ -5,6 +5,12 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Gate the release on tests — a build that fails tests never ships.
+echo "== running tests before release"
+(cd "$ROOT/server" && npm test)
+(cd "$ROOT/app" && swift test)
+
 "$ROOT/scripts/bundle-app.sh"
 
 BUNDLE="$ROOT/app/dist/Notch.app"

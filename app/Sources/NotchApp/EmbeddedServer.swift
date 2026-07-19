@@ -1,6 +1,7 @@
 import AppKit
 import FlyingFox
 import Foundation
+import NotchCore
 
 /// The in-app server: hooks (local and remote) POST here; the UI updates directly.
 /// Same HTTP API as the optional headless Node server, minus the WebSocket.
@@ -35,29 +36,14 @@ final class EmbeddedServer {
 
     /// Only loopback and the Tailscale private network may talk to the server —
     /// LAN and internet sources are rejected before auth is even considered.
+    /// The policy itself lives in NotchCore.SourceFilter (unit-tested).
     static func allowedSource(_ request: HTTPRequest) -> Bool {
         switch request.remoteAddress {
-        case .ip4(let ip, port: _):
-            return ip == "127.0.0.1" || isTailscaleIP4(ip)
-        case .ip6(let ip, port: _):
-            if ip == "::1" { return true }
-            if ip.lowercased().hasPrefix("fd7a:115c:a1e0") { return true } // Tailscale ULA
-            if let mapped = ip.split(separator: ":").last.map(String.init), ip.lowercased().contains("::ffff:") {
-                return mapped == "127.0.0.1" || isTailscaleIP4(mapped)
-            }
-            return false
-        case .unix:
-            return true
-        case nil:
-            return false
+        case .ip4(let ip, port: _): return SourceFilter.isAllowed(ip: ip)
+        case .ip6(let ip, port: _): return SourceFilter.isAllowed(ip: ip)
+        case .unix: return true
+        case nil: return false
         }
-    }
-
-    /// Tailscale hands out addresses from the CGNAT range 100.64.0.0/10.
-    private static func isTailscaleIP4(_ ip: String) -> Bool {
-        let parts = ip.split(separator: ".").compactMap { Int($0) }
-        guard parts.count == 4, parts[0] == 100 else { return false }
-        return (64...127).contains(parts[1])
     }
 
     private func bearer(_ request: HTTPRequest) -> String? {

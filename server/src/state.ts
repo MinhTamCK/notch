@@ -77,7 +77,7 @@ function trunc(s: unknown, n: number): string | undefined {
 }
 
 /** Metadata-only view of a hook envelope for the default (privacy-preserving) log. */
-function redact(data: unknown): unknown {
+export function redact(data: unknown): unknown {
   if (!data || typeof data !== 'object') return data
   const env = data as HookEnvelope
   const event = env.event ?? {}
