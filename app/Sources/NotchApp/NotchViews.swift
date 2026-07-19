@@ -432,6 +432,16 @@ struct SettingsSection: View {
                 }
             }
 
+            settingRow(
+                title: "Alert on \u{201C}your turn\u{201D}",
+                subtitle: "Ping when Claude finishes and waits for you"
+            ) {
+                Toggle("", isOn: $model.notifyOnTurnDone)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+            }
+
             HStack {
                 Text("Notch v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev")")
                     .font(.caption2)

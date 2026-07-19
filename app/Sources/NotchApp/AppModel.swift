@@ -20,6 +20,10 @@ final class AppModel: ObservableObject {
     @Published var soundEnabled: Bool = UserDefaults.standard.object(forKey: "soundEnabled") as? Bool ?? true {
         didSet { UserDefaults.standard.set(soundEnabled, forKey: "soundEnabled") }
     }
+    /// When on, the idle "your turn" ping (Claude finished a turn) also expands + alerts.
+    @Published var notifyOnTurnDone: Bool = UserDefaults.standard.bool(forKey: "notifyOnTurnDone") {
+        didSet { UserDefaults.standard.set(notifyOnTurnDone, forKey: "notifyOnTurnDone") }
+    }
     @Published private(set) var mode: Mode = .client
     @Published private(set) var updateAvailable: (version: String, url: String)?
 
@@ -467,10 +471,11 @@ final class AppModel: ObservableObject {
             if let tool = env.event.tool_name { s.lastTool = describeTool(tool, env.event.tool_input) }
         case "Notification":
             let msg = env.event.message ?? ""
-            // "waiting for your input" is the idle "your turn" ping — not an action to
-            // confirm, so don't force-expand or hold the panel open for it.
-            if !msg.lowercased().contains("waiting for your input"), !hasPendingPermission(key) {
-                s.state = .needsAttention
+            // "waiting for your input" is the idle "your turn" ping. Treat it as an
+            // alert only when the user opted in; otherwise mark the turn done.
+            let isIdle = msg.lowercased().contains("waiting for your input")
+            if !hasPendingPermission(key) {
+                s.state = (isIdle && !notifyOnTurnDone) ? .done : .needsAttention
             }
             s.lastMessage = trunc(msg, 300)
         case "Stop":

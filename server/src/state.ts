@@ -133,6 +133,8 @@ export class Store {
 
   // Raw prompts/commands/file contents are only logged when explicitly opted in.
   private logPayloads = process.env.NOTCH_LOG_PAYLOADS === '1'
+  // When on, the idle "your turn" ping also raises attention.
+  private notifyOnTurnDone = process.env.NOTCH_NOTIFY_TURN_DONE === '1'
 
   constructor(dataDir: string) {
     mkdirSync(dataDir, { recursive: true, mode: 0o700 })
@@ -221,10 +223,11 @@ export class Store {
         break
       case 'Notification': {
         const msg = env.event.message ?? ''
-        // "waiting for your input" is the idle "your turn" ping — not an action to
-        // confirm, so don't force-expand or hold the panel open for it.
-        if (!msg.toLowerCase().includes('waiting for your input') && !this.hasPendingPermission(s)) {
-          s.state = 'needs_attention'
+        // "waiting for your input" is the idle "your turn" ping. Only raise attention
+        // for it when the user opted in; otherwise mark the turn done.
+        const isIdle = msg.toLowerCase().includes('waiting for your input')
+        if (!this.hasPendingPermission(s)) {
+          s.state = isIdle && !this.notifyOnTurnDone ? 'done' : 'needs_attention'
         }
         s.lastMessage = trunc(msg, 300)
         break

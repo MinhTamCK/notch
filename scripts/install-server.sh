@@ -41,7 +41,7 @@ cat > "$PLIST" <<EOF
   <array>
     <string>/bin/sh</string>
     <string>-c</string>
-    <string>. "\$HOME/.notch/env"; export NOTCH_TOKEN NOTCH_OPERATOR_TOKEN NOTCH_PORT NOTCH_STALE_MINUTES NOTCH_RETAIN_HOURS; cd "$SERVER_DIR"; exec "$NODE_BIN" node_modules/.bin/tsx src/index.ts</string>
+    <string>. "\$HOME/.notch/env"; export NOTCH_TOKEN NOTCH_OPERATOR_TOKEN NOTCH_PORT NOTCH_STALE_MINUTES NOTCH_RETAIN_HOURS NOTCH_NOTIFY_TURN_DONE; cd "$SERVER_DIR"; exec "$NODE_BIN" node_modules/.bin/tsx src/index.ts</string>
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
