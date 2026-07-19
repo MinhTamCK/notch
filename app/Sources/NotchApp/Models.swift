@@ -16,12 +16,12 @@ struct Session: Codable, Identifiable, Equatable {
     let machine: String
     let sessionId: String
     let agent: String
-    let cwd: String?
-    let state: SessionState
-    let lastTool: String?
-    let lastMessage: String?
-    let startedAt: Double
-    let updatedAt: Double
+    var cwd: String?
+    var state: SessionState
+    var lastTool: String?
+    var lastMessage: String?
+    var startedAt: Double
+    var updatedAt: Double
 
     var id: String { key }
     var projectName: String {
@@ -115,6 +115,23 @@ struct PermissionRequest: Codable, Identifiable, Equatable {
         guard toolName == "Write" else { return nil }
         return toolInput?["content"]?.stringValue?.components(separatedBy: "\n")
     }
+}
+
+/// What hooks POST to the server (both bash and compiled variants).
+struct HookEnvelope: Decodable {
+    let machine: String
+    let agent: String?
+    let event: HookEvent
+}
+
+struct HookEvent: Decodable {
+    let session_id: String?
+    let hook_event_name: String?
+    let cwd: String?
+    let prompt: String?
+    let message: String?
+    let tool_name: String?
+    let tool_input: JSONValue?
 }
 
 struct ServerMessage: Decodable {

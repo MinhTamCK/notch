@@ -19,6 +19,7 @@ fi
 rm -rf "$BUNDLE"
 mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources"
 cp "$BIN" "$BUNDLE/Contents/MacOS/NotchApp"
+cp "$ROOT/app/.build/apple/Products/Release/notch-hook" "$BUNDLE/Contents/Resources/notch-hook"
 cp "$DIST/AppIcon.icns" "$BUNDLE/Contents/Resources/AppIcon.icns"
 
 cat > "$BUNDLE/Contents/Info.plist" <<'EOF'
@@ -32,7 +33,7 @@ cat > "$BUNDLE/Contents/Info.plist" <<'EOF'
   <key>CFBundleDisplayName</key><string>Notch</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+  <key>CFBundleShortVersionString</key><string>0.2.0</string>
   <key>CFBundleVersion</key><string>1</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>

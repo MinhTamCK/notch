@@ -19,11 +19,20 @@ struct MenuContent: View {
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
 
     var body: some View {
-        Text("\(model.connection.rawValue) — \(model.serverDescription)")
+        Text("\(model.mode == .hosting ? "●" : model.connection.rawValue) \(model.serverDescription)")
         Text("\(model.workingCount) working · \(model.attentionCount) need you")
         Divider()
         Button("Show sessions") { model.requestExpand?() }
-        Button("Reconnect") { model.connect() }
+        if model.mode == .hosting {
+            Button(LocalSetup.isInstalled ? "Reinstall Claude Code Hooks (this Mac)" : "Enable Claude Code on This Mac") {
+                try? LocalSetup.install()
+            }
+            Button("Add Remote Machine (Copy Command)") {
+                RemoteAdd.copyToClipboard(token: model.token, port: model.hostedPort)
+            }
+        } else {
+            Button("Reconnect") { model.start() }
+        }
         Toggle("Sound Alerts", isOn: $model.soundEnabled)
         // Registration only works from an installed .app bundle, not `swift run`.
         if Bundle.main.bundlePath.hasSuffix(".app") {
@@ -99,7 +108,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             self?.handleClick(event) ?? event
         }
 
-        model.connect()
+        model.start()
         setNotch(expanded: false)
     }
 

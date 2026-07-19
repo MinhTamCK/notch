@@ -1,5 +1,5 @@
 {
-  "originHash" : "dcc6b50ac4b6a1a2a5135642ab96fef23b4ff4daf16844de33fadbd2c57648e0",
+  "originHash" : "516fd1390985df50962037ad2b2b7a0ad61129b703d1879bbce3026129839a0b",
   "pins" : [
     {
       "identity" : "dynamicnotchkit",
@@ -8,6 +8,15 @@
       "state" : {
         "revision" : "cd0b3e52d537db115ad3a9d89601f20e0bee8d27",
         "version" : "1.1.0"
+      }
+    },
+    {
+      "identity" : "flyingfox",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/swhitty/FlyingFox",
+      "state" : {
+        "revision" : "4e246d3fb515bd2069e5c169abdc75808b90548f",
+        "version" : "0.27.1"
       }
     }
   ],

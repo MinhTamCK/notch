@@ -7,6 +7,11 @@ final class AppModel: ObservableObject {
         case connecting, connected, disconnected
     }
 
+    enum Mode {
+        case hosting   // this app IS the server (default: NOTCH_SERVER is localhost)
+        case client    // viewer of a server elsewhere (or an external local server)
+    }
+
     @Published private(set) var sessions: [String: Session] = [:]
     @Published private(set) var pendingPermissions: [String: PermissionRequest] = [:]
     @Published private(set) var connection: ConnectionState = .disconnected
@@ -14,6 +19,19 @@ final class AppModel: ObservableObject {
     @Published var soundEnabled: Bool = UserDefaults.standard.object(forKey: "soundEnabled") as? Bool ?? true {
         didSet { UserDefaults.standard.set(soundEnabled, forKey: "soundEnabled") }
     }
+    @Published private(set) var mode: Mode = .client
+
+    var token = ""
+    private(set) var hostedPort: UInt16 = 4519
+    private var embedded: EmbeddedServer?
+    private var sweepTask: Task<Void, Never>?
+    private var staleAfterMs: Double = 15 * 60 * 1000
+    private var retainFinishedMs: Double = 6 * 60 * 60 * 1000
+    private let permissionExpiryMs: Double = 90 * 1000
+    // Hosting-mode bookkeeping (not part of the Session payload)
+    private var sessionPendingIds: [String: [String]] = [:]
+    private var decidedPermissions: [String: (decision: String, reason: String?, at: Double)] = [:]
+    private var permissionWaiters: [String: [CheckedContinuation<(String, String?)?, Never>]] = [:]
 
     /// Wired by AppDelegate to control the notch panel.
     var requestExpand: (() -> Void)?
@@ -37,21 +55,93 @@ final class AppModel: ObservableObject {
 
     // MARK: Config
 
-    /// Reads ~/.notch/env (same file the hooks use); falls back to local dev defaults.
-    static func loadConfig() -> (server: String, token: String) {
-        var values = ["NOTCH_SERVER": "http://localhost:4519", "NOTCH_TOKEN": "dev-token"]
+    /// Reads ~/.notch/env (same file the hooks use); falls back to local defaults.
+    static func loadConfig() -> (server: String, token: String, staleMinutes: Double, retainHours: Double) {
+        var values: [String: String] = [:]
         let envFile = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".notch/env")
         if let text = try? String(contentsOf: envFile, encoding: .utf8) {
-            for line in text.split(separator: "\n") {
+            for line in text.split(separator: "\n") where !line.hasPrefix("#") {
                 let parts = line.split(separator: "=", maxSplits: 1)
-                guard parts.count == 2, !line.hasPrefix("#") else { continue }
+                guard parts.count == 2 else { continue }
                 let key = parts[0].trimmingCharacters(in: .whitespaces)
-                let value = parts[1].trimmingCharacters(in: CharacterSet(charactersIn: " \"'"))
-                if values.keys.contains(key) { values[key] = value }
+                values[key] = parts[1].trimmingCharacters(in: CharacterSet(charactersIn: " \"'"))
             }
         }
-        return (values["NOTCH_SERVER"]!, values["NOTCH_TOKEN"]!)
+        return (
+            values["NOTCH_SERVER"] ?? "http://localhost:4519",
+            values["NOTCH_TOKEN"] ?? "dev-token",
+            Double(values["NOTCH_STALE_MINUTES"] ?? "") ?? 15,
+            Double(values["NOTCH_RETAIN_HOURS"] ?? "") ?? 6
+        )
+    }
+
+    // MARK: Startup
+
+    /// Zero-config entry point: ensure ~/.notch/env exists, then host locally by
+    /// default — or act as a client when NOTCH_SERVER points elsewhere (or an
+    /// external server already owns the port).
+    func start() {
+        Self.ensureEnvFile()
+        let config = Self.loadConfig()
+        token = config.token
+        staleAfterMs = config.staleMinutes * 60 * 1000
+        retainFinishedMs = config.retainHours * 60 * 60 * 1000
+        serverDescription = config.server
+
+        guard let url = URL(string: config.server),
+              let host = url.host,
+              ["localhost", "127.0.0.1"].contains(host)
+        else {
+            connect()
+            return
+        }
+
+        let port = UInt16(url.port ?? 4519)
+        hostedPort = port
+        Task { @MainActor in
+            if await Self.isHealthy(config.server) {
+                self.connect() // an external server (e.g. headless Node) owns the port
+                return
+            }
+            let server = EmbeddedServer(model: self, token: config.token, port: port)
+            do {
+                try await server.start()
+                self.embedded = server
+                self.mode = .hosting
+                self.connection = .connected
+                self.serverDescription = "hosting on :\(port)"
+                self.startSweeps()
+            } catch {
+                self.connect()
+            }
+        }
+    }
+
+    nonisolated static func ensureEnvFile() {
+        let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".notch")
+        let file = dir.appendingPathComponent("env")
+        guard !FileManager.default.fileExists(atPath: file.path) else { return }
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        var bytes = [UInt8](repeating: 0, count: 16)
+        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        let newToken = bytes.map { String(format: "%02x", $0) }.joined()
+        let hostname = ProcessInfo.processInfo.hostName.split(separator: ".").first.map(String.init) ?? "mac"
+        let content = """
+        NOTCH_SERVER="http://localhost:4519"
+        NOTCH_TOKEN="\(newToken)"
+        NOTCH_MACHINE="\(hostname)"
+        NOTCH_REMOTE_APPROVE=1
+        """
+        try? content.write(to: file, atomically: true, encoding: .utf8)
+    }
+
+    nonisolated static func isHealthy(_ server: String) async -> Bool {
+        guard let url = URL(string: server + "/health") else { return false }
+        var req = URLRequest(url: url, timeoutInterval: 1)
+        req.httpMethod = "GET"
+        guard let (_, response) = try? await URLSession.shared.data(for: req) else { return false }
+        return (response as? HTTPURLResponse)?.statusCode == 200
     }
 
     // MARK: Connection
@@ -183,7 +273,11 @@ final class AppModel: ObservableObject {
     // MARK: Decisions
 
     func decide(_ id: String, decision: String) {
-        // Optimistic removal; the server's permission_resolved broadcast confirms it.
+        if mode == .hosting {
+            _ = localDecide(id, decision: decision, reason: "Decided via Notch app")
+            return
+        }
+        // Client mode: optimistic removal; the server's broadcast confirms it.
         pendingPermissions.removeValue(forKey: id)
         let payload: [String: String] = [
             "type": "decide",
@@ -195,5 +289,184 @@ final class AppModel: ObservableObject {
               let text = String(data: data, encoding: .utf8)
         else { return }
         task?.send(.string(text)) { _ in }
+    }
+
+    // MARK: - Hosting-mode store (port of the Node server's state machine)
+
+    private func trunc(_ s: String?, _ n: Int) -> String? {
+        guard let s, !s.isEmpty else { return nil }
+        return s.count > n ? String(s.prefix(n)) + "…" : s
+    }
+
+    /// Slash-command invocations arrive as XML-ish wrappers; show the command itself.
+    private func cleanPrompt(_ p: String?) -> String? {
+        guard let p else { return nil }
+        if let cmdRange = p.range(of: "<command-name>([^<]+)</command-name>", options: .regularExpression) {
+            let cmd = String(p[cmdRange]).replacingOccurrences(of: "<command-name>", with: "")
+                .replacingOccurrences(of: "</command-name>", with: "").trimmingCharacters(in: .whitespaces)
+            var args = ""
+            if let argRange = p.range(of: "<command-args>([^<]*)</command-args>", options: .regularExpression) {
+                args = String(p[argRange]).replacingOccurrences(of: "<command-args>", with: "")
+                    .replacingOccurrences(of: "</command-args>", with: "").trimmingCharacters(in: .whitespaces)
+            }
+            return trunc("\(cmd) \(args)".trimmingCharacters(in: .whitespaces), 200)
+        }
+        return trunc(p, 200)
+    }
+
+    private func describeTool(_ name: String, _ input: JSONValue?) -> String {
+        switch name {
+        case "Bash": return trunc("$ \(input?["command"]?.stringValue ?? "")", 120) ?? name
+        case "Write", "Edit", "MultiEdit": return trunc("\(name) \(input?["file_path"]?.stringValue ?? "")", 120) ?? name
+        case "ExitPlanMode": return "Plan ready for review"
+        default: return name
+        }
+    }
+
+    private func hasPendingPermission(_ key: String) -> Bool {
+        (sessionPendingIds[key] ?? []).contains { pendingPermissions[$0] != nil }
+    }
+
+    private func upsertSession(_ env: HookEnvelope) -> String? {
+        guard let sid = env.event.session_id else { return nil }
+        let key = "\(env.machine):\(sid)"
+        if sessions[key] == nil {
+            sessions[key] = Session(
+                key: key, machine: env.machine, sessionId: sid,
+                agent: env.agent ?? "claude-code", cwd: env.event.cwd,
+                state: .working, lastTool: nil, lastMessage: nil,
+                startedAt: Date().timeIntervalSince1970 * 1000,
+                updatedAt: Date().timeIntervalSince1970 * 1000
+            )
+        }
+        if let cwd = env.event.cwd { sessions[key]?.cwd = cwd }
+        return key
+    }
+
+    func applyEnvelope(_ env: HookEnvelope) -> Bool {
+        guard let key = upsertSession(env), var s = sessions[key] else { return false }
+        let previous = s.state
+        switch env.event.hook_event_name {
+        case "SessionStart":
+            s.state = .working
+        case "UserPromptSubmit":
+            s.state = .working
+            s.lastMessage = cleanPrompt(env.event.prompt)
+        case "PreToolUse", "PostToolUse":
+            if !hasPendingPermission(key) { s.state = .working }
+            if let tool = env.event.tool_name { s.lastTool = describeTool(tool, env.event.tool_input) }
+        case "Notification":
+            if !hasPendingPermission(key) { s.state = .needsAttention }
+            s.lastMessage = trunc(env.event.message, 300)
+        case "Stop":
+            s.state = .done
+        case "SessionEnd":
+            s.state = .ended
+        default:
+            break
+        }
+        s.updatedAt = Date().timeIntervalSince1970 * 1000
+        sessions[key] = s
+        sessionStateChanged(from: previous, to: s.state)
+        return true
+    }
+
+    func createPermission(_ env: HookEnvelope) -> String? {
+        guard let toolName = env.event.tool_name,
+              let key = upsertSession(env),
+              var s = sessions[key]
+        else { return nil }
+        let previous = s.state
+        let request = PermissionRequest(
+            id: UUID().uuidString.lowercased(),
+            machine: env.machine,
+            sessionId: s.sessionId,
+            toolName: toolName,
+            toolInput: env.event.tool_input,
+            cwd: env.event.cwd,
+            createdAt: Date().timeIntervalSince1970 * 1000
+        )
+        pendingPermissions[request.id] = request
+        sessionPendingIds[key, default: []].append(request.id)
+        s.state = .needsPermission
+        s.lastTool = describeTool(toolName, env.event.tool_input)
+        s.updatedAt = Date().timeIntervalSince1970 * 1000
+        sessions[key] = s
+        sessionStateChanged(from: previous, to: s.state)
+        return request.id
+    }
+
+    @discardableResult
+    func localDecide(_ id: String, decision: String, reason: String?) -> Bool {
+        guard let request = pendingPermissions.removeValue(forKey: id) else { return false }
+        decidedPermissions[id] = (decision, reason, Date().timeIntervalSince1970 * 1000)
+
+        let key = "\(request.machine):\(request.sessionId)"
+        sessionPendingIds[key]?.removeAll { $0 == id }
+        if var s = sessions[key], s.state == .needsPermission, !hasPendingPermission(key) {
+            // On timeout the hook falls back to the terminal prompt, so the user is needed there.
+            s.state = decision == "timeout" ? .needsAttention : .working
+            s.updatedAt = Date().timeIntervalSince1970 * 1000
+            sessions[key] = s
+            if attentionCount == 0 { onAttention?(false) }
+        }
+
+        for waiter in permissionWaiters.removeValue(forKey: id) ?? [] {
+            waiter.resume(returning: (decision, reason))
+        }
+        return true
+    }
+
+    /// Long-poll support for hooks. Returns nil for unknown ids.
+    func waitForDecision(_ id: String, waitSeconds: Int) async -> (String, String?)? {
+        if let done = decidedPermissions[id] { return (done.decision, done.reason) }
+        guard pendingPermissions[id] != nil else { return nil }
+        return await withCheckedContinuation { continuation in
+            permissionWaiters[id, default: []].append(continuation)
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(waitSeconds))
+                guard let self, self.pendingPermissions[id] != nil else { return }
+                self.localDecide(id, decision: "timeout", reason: "No decision before hook timeout")
+            }
+        }
+    }
+
+    private func sessionStateChanged(from previous: SessionState, to state: SessionState) {
+        if state.needsUser, previous != state {
+            alert()
+        } else if !state.needsUser, attentionCount == 0 {
+            onAttention?(false)
+        }
+    }
+
+    private func startSweeps() {
+        sweepTask?.cancel()
+        sweepTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(60))
+                self?.sweep()
+            }
+        }
+    }
+
+    private func sweep() {
+        let now = Date().timeIntervalSince1970 * 1000
+        // Expire abandoned permission requests (hook died before long-polling).
+        for (id, request) in pendingPermissions where request.createdAt < now - permissionExpiryMs {
+            localDecide(id, decision: "timeout", reason: "Expired unanswered")
+        }
+        for (id, done) in decidedPermissions where done.at < now - 5 * 60 * 1000 {
+            decidedPermissions.removeValue(forKey: id)
+        }
+        for (key, var s) in sessions {
+            if s.state.needsUser || s.state == .working, s.updatedAt < now - staleAfterMs {
+                s.state = .stale
+                s.updatedAt = now
+                sessions[key] = s
+            } else if !(s.state.needsUser || s.state == .working), s.updatedAt < now - retainFinishedMs {
+                sessions.removeValue(forKey: key)
+                sessionPendingIds.removeValue(forKey: key)
+            }
+        }
     }
 }

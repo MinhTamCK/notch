@@ -68,6 +68,12 @@ Caveats (accepted for v1):
 - `notch-hook.sh`: single script handling all hook events (reads stdin JSON, adds machine
   label + timestamp, POSTs; long-poll branch for PreToolUse). Deps: `curl`, `jq`.
 
+> **v0.2.0 update:** the server is now embedded inside Notch.app (FlyingFox) — open the app
+> and it hosts `:4519` itself, zero config. Remote machines join via the menu's
+> "Add Remote Machine" one-liner (`curl …/install?token=… | bash`). The Node server below
+> remains as an optional headless deployment; the app auto-detects it and switches to
+> client mode if something already owns the port (or NOTCH_SERVER points elsewhere).
+
 **2. `server/` — central server (Node 22 + TypeScript, Hono + `ws`, SQLite via better-sqlite3)**
 - `POST /api/events` — ingest hook events (bearer token auth)
 - `POST /api/permissions` + `GET /api/permissions/:id/decision?wait=55` — permission long-poll
