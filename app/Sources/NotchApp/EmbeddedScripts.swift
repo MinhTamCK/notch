@@ -11,7 +11,13 @@ enum EmbeddedScripts {
     set -u
 
     MODE="${1:-event}"
+    # Caller-provided env wins over ~/.notch/env (matches the compiled notch-hook).
+    _ns="${NOTCH_SERVER-}"; _nt="${NOTCH_TOKEN-}"; _nm="${NOTCH_MACHINE-}"; _nr="${NOTCH_REMOTE_APPROVE-}"
     [ -f "$HOME/.notch/env" ] && . "$HOME/.notch/env"
+    [ -n "$_ns" ] && NOTCH_SERVER="$_ns"
+    [ -n "$_nt" ] && NOTCH_TOKEN="$_nt"
+    [ -n "$_nm" ] && NOTCH_MACHINE="$_nm"
+    [ -n "$_nr" ] && NOTCH_REMOTE_APPROVE="$_nr"
     NOTCH_SERVER="${NOTCH_SERVER:-http://localhost:4519}"
     NOTCH_TOKEN="${NOTCH_TOKEN:-dev-token}"
     NOTCH_MACHINE="${NOTCH_MACHINE:-$(hostname -s)}"
@@ -76,17 +82,22 @@ enum EmbeddedScripts {
     done
 
     mkdir -p "$HOME/.notch" "$HOME/.claude"
+    chmod 700 "$HOME/.notch"
 
     curl -fsS "__SERVER__/install/hook?token=__TOKEN__" -o "$HOME/.notch/notch-hook.sh"
     chmod 755 "$HOME/.notch/notch-hook.sh"
 
     if [ ! -f "$HOME/.notch/env" ]; then
-      cat > "$HOME/.notch/env" <<EOF
+      # This machine gets only the machine token — it can report and request
+      # permission, but never approve on another machine's behalf.
+      ( umask 077; cat > "$HOME/.notch/env" <<EOF
     NOTCH_SERVER="__SERVER__"
     NOTCH_TOKEN="__TOKEN__"
     NOTCH_MACHINE="$(hostname -s)"
     NOTCH_REMOTE_APPROVE=1
     EOF
+      )
+      chmod 600 "$HOME/.notch/env"
       echo "wrote $HOME/.notch/env"
     else
       echo "kept existing $HOME/.notch/env"

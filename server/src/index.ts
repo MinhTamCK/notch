@@ -7,11 +7,19 @@ import { fileURLToPath } from 'node:url'
 import { Store, type Decision } from './state.js'
 
 const PORT = Number(process.env.NOTCH_PORT ?? 4519)
-const TOKEN = process.env.NOTCH_TOKEN ?? 'dev-token'
+// Machine role: report events, open permission requests, poll own decision.
+const TOKEN = process.env.NOTCH_TOKEN ?? ''
+// Operator role: list sessions, open the dashboard WebSocket, decide permissions.
+// Falls back to the machine token only if unset (single-token compatibility mode).
+const OPERATOR_TOKEN = process.env.NOTCH_OPERATOR_TOKEN || TOKEN
 const MAX_WAIT_SEC = 120
+const MAX_BODY_BYTES = 256 * 1024
 
-if (TOKEN === 'dev-token') {
-  console.warn('[notch] NOTCH_TOKEN not set — using insecure default "dev-token"')
+// Refuse to run with a missing or weak credential — a public default token would
+// let anyone on the tailnet approve tool calls.
+if (!TOKEN || TOKEN === 'dev-token' || TOKEN.length < 16) {
+  console.error('[notch] refusing to start: set NOTCH_TOKEN to a strong secret (>= 16 chars)')
+  process.exit(1)
 }
 
 const dataDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'data')
@@ -38,33 +46,34 @@ app.use('*', async (c, next) => {
 
 app.get('/health', c => c.json({ ok: true }))
 
-app.use('/api/*', async (c, next) => {
-  if (c.req.header('authorization') !== `Bearer ${TOKEN}`) {
-    return c.json({ error: 'unauthorized' }, 401)
+/** Bearer-token check for a given role. Operator implies machine rights. */
+function requireRole(role: 'machine' | 'operator') {
+  return async (c: Parameters<Parameters<typeof app.use>[1]>[0], next: () => Promise<void>) => {
+    const auth = c.req.header('authorization')
+    const ok =
+      auth === `Bearer ${OPERATOR_TOKEN}` ||
+      (role === 'machine' && auth === `Bearer ${TOKEN}`)
+    if (!ok) return c.json({ error: 'unauthorized' }, 401)
+    // Cap body size before any handler reads it.
+    const len = Number(c.req.header('content-length') ?? 0)
+    if (len > MAX_BODY_BYTES) return c.json({ error: 'payload too large' }, 413)
+    await next()
   }
-  await next()
-})
+}
 
-app.post('/api/events', async c => {
+app.post('/api/events', requireRole('machine'), async c => {
   const session = store.handleEvent(await c.req.json())
   if (!session) return c.json({ error: 'missing machine or session_id' }, 400)
   return c.json({ ok: true })
 })
 
-app.get('/api/sessions', c => c.json({ sessions: store.snapshot().sessions }))
-
-app.get('/api/permissions', c => {
-  const pending = [...store.permissions.values()].filter(p => !p.decision)
-  return c.json({ permissions: pending })
-})
-
-app.post('/api/permissions', async c => {
+app.post('/api/permissions', requireRole('machine'), async c => {
   const req = store.createPermission(await c.req.json())
   if (!req) return c.json({ error: 'missing machine, session_id or tool_name' }, 400)
   return c.json({ id: req.id })
 })
 
-app.get('/api/permissions/:id/decision', async c => {
+app.get('/api/permissions/:id/decision', requireRole('machine'), async c => {
   const waitSec = Math.min(Number(c.req.query('wait') ?? 0), MAX_WAIT_SEC)
   const pending = store.waitForDecision(c.req.param('id'), waitSec * 1000)
   if (!pending) return c.json({ error: 'unknown permission id' }, 404)
@@ -72,7 +81,16 @@ app.get('/api/permissions/:id/decision', async c => {
   return c.json({ decision: req.decision, reason: req.reason })
 })
 
-app.post('/api/permissions/:id/decide', async c => {
+// Operator-only: viewing all sessions and deciding requests is a dashboard right,
+// not something a reporting machine should be able to do.
+app.get('/api/sessions', requireRole('operator'), c => c.json({ sessions: store.snapshot().sessions }))
+
+app.get('/api/permissions', requireRole('operator'), c => {
+  const pending = [...store.permissions.values()].filter(p => !p.decision)
+  return c.json({ permissions: pending })
+})
+
+app.post('/api/permissions/:id/decide', requireRole('operator'), async c => {
   const body = await c.req.json<{ decision: Decision; reason?: string }>()
   if (body.decision !== 'allow' && body.decision !== 'deny') {
     return c.json({ error: 'decision must be "allow" or "deny"' }, 400)
@@ -92,7 +110,8 @@ server.on('upgrade', (req, socket, head) => {
   if (!allowedSource(req.socket.remoteAddress)) return socket.destroy()
   const url = new URL(req.url ?? '', 'http://localhost')
   if (url.pathname !== '/ws') return socket.destroy()
-  if (url.searchParams.get('token') !== TOKEN) {
+  // The dashboard WebSocket (snapshots + decide) is operator-only.
+  if (url.searchParams.get('token') !== OPERATOR_TOKEN) {
     socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n')
     return socket.destroy()
   }

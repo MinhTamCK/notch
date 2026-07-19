@@ -120,6 +120,8 @@ if cfg("NOTCH_DEBUG", "0") == "1" {
     } else {
         try? line.write(to: logURL, atomically: true, encoding: .utf8)
     }
+    // Raw payloads may contain prompts/commands — keep the log owner-only.
+    try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: logURL.path)
 }
 
 guard let raw = (try? JSONSerialization.jsonObject(with: stdinData)) as? [String: Any] else { exit(0) }

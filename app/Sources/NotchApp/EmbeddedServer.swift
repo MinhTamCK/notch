@@ -6,14 +6,16 @@ import Foundation
 /// Same HTTP API as the optional headless Node server, minus the WebSocket.
 final class EmbeddedServer {
     private let model: AppModel
-    private let token: String
+    private let machineToken: String   // report events / open + poll permissions
+    private let operatorToken: String  // list sessions / decide (this Mac only)
     private let port: UInt16
     private let server: HTTPServer
     private var runTask: Task<Void, Never>?
 
-    init(model: AppModel, token: String, port: UInt16) {
+    init(model: AppModel, machineToken: String, operatorToken: String, port: UInt16) {
         self.model = model
-        self.token = token
+        self.machineToken = machineToken
+        self.operatorToken = operatorToken
         self.port = port
         self.server = HTTPServer(port: port)
     }
@@ -58,9 +60,26 @@ final class EmbeddedServer {
         return (64...127).contains(parts[1])
     }
 
-    private func authorized(_ request: HTTPRequest) -> Bool {
-        Self.allowedSource(request)
-            && request.headers[HTTPHeader("Authorization")] == "Bearer \(token)"
+    private func bearer(_ request: HTTPRequest) -> String? {
+        request.headers[HTTPHeader("Authorization")]?.replacingOccurrences(of: "Bearer ", with: "")
+    }
+
+    private static let maxBodyBytes = 256 * 1024
+
+    private func withinSizeLimit(_ request: HTTPRequest) -> Bool {
+        guard let len = request.headers[HTTPHeader("Content-Length")].flatMap({ Int($0) }) else { return true }
+        return len <= Self.maxBodyBytes
+    }
+
+    /// Machine role: report events, open + poll permissions. Operator implies it.
+    private func machineOK(_ request: HTTPRequest) -> Bool {
+        guard Self.allowedSource(request), withinSizeLimit(request), let t = bearer(request) else { return false }
+        return t == machineToken || t == operatorToken
+    }
+
+    /// Operator role: list sessions and decide — never granted to a reporting machine.
+    private func operatorOK(_ request: HTTPRequest) -> Bool {
+        Self.allowedSource(request) && bearer(request) == operatorToken
     }
 
     private func json(_ object: Any, status: HTTPStatusCode = .ok) -> HTTPResponse {
@@ -88,7 +107,7 @@ final class EmbeddedServer {
 
         await server.appendRoute("POST /api/events") { [weak self] request in
             guard let self else { return HTTPResponse(statusCode: .serviceUnavailable) }
-            guard self.authorized(request) else { return self.unauthorized }
+            guard self.machineOK(request) else { return self.unauthorized }
             guard let body = try? await request.bodyData,
                   let envelope = try? JSONDecoder().decode(HookEnvelope.self, from: body)
             else { return self.json(["error": "bad envelope"], status: .badRequest) }
@@ -98,7 +117,7 @@ final class EmbeddedServer {
 
         await server.appendRoute("GET /api/sessions") { [weak self] request in
             guard let self else { return HTTPResponse(statusCode: .serviceUnavailable) }
-            guard self.authorized(request) else { return self.unauthorized }
+            guard self.operatorOK(request) else { return self.unauthorized }
             struct Payload: Encodable { let sessions: [Session] }
             let sessions = await MainActor.run { Array(model.sessions.values) }
             return self.encoded(Payload(sessions: sessions))
@@ -106,7 +125,7 @@ final class EmbeddedServer {
 
         await server.appendRoute("GET /api/permissions") { [weak self] request in
             guard let self else { return HTTPResponse(statusCode: .serviceUnavailable) }
-            guard self.authorized(request) else { return self.unauthorized }
+            guard self.operatorOK(request) else { return self.unauthorized }
             struct Payload: Encodable { let permissions: [PermissionRequest] }
             let pending = await MainActor.run { Array(model.pendingPermissions.values) }
             return self.encoded(Payload(permissions: pending))
@@ -114,7 +133,7 @@ final class EmbeddedServer {
 
         await server.appendRoute("POST /api/permissions") { [weak self] request in
             guard let self else { return HTTPResponse(statusCode: .serviceUnavailable) }
-            guard self.authorized(request) else { return self.unauthorized }
+            guard self.machineOK(request) else { return self.unauthorized }
             guard let body = try? await request.bodyData,
                   let envelope = try? JSONDecoder().decode(HookEnvelope.self, from: body)
             else { return self.json(["error": "bad envelope"], status: .badRequest) }
@@ -126,7 +145,7 @@ final class EmbeddedServer {
 
         await server.appendRoute("GET /api/permissions/:id/decision?wait=:wait") { [weak self] request in
             guard let self else { return HTTPResponse(statusCode: .serviceUnavailable) }
-            guard self.authorized(request) else { return self.unauthorized }
+            guard self.machineOK(request) else { return self.unauthorized }
             guard let id = request.routeParameters["id"] else { return self.json(["error": "bad id"], status: .badRequest) }
             let wait = min(Int(request.routeParameters["wait"] ?? "0") ?? 0, 120)
             guard let (decision, reason) = await model.waitForDecision(id, waitSeconds: wait) else {
@@ -137,7 +156,7 @@ final class EmbeddedServer {
 
         await server.appendRoute("POST /api/permissions/:id/decide") { [weak self] request in
             guard let self else { return HTTPResponse(statusCode: .serviceUnavailable) }
-            guard self.authorized(request) else { return self.unauthorized }
+            guard self.operatorOK(request) else { return self.unauthorized }
             guard let id = request.routeParameters["id"],
                   let body = try? await request.bodyData,
                   let parsed = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any],
@@ -150,21 +169,24 @@ final class EmbeddedServer {
             return ok ? self.json(["ok": true]) : self.json(["error": "unknown or already-decided id"], status: .conflict)
         }
 
-        // One-liner remote install: curl -fsSL "http://<mac>:4519/install?token=…" | bash
+        // One-liner remote install. The URL carries the OPERATOR token (only the host
+        // can mint installers); the script it returns provisions the remote machine
+        // with the MACHINE token — a compromised remote can never approve for others.
         await server.appendRoute("GET /install?token=:token") { [weak self] request in
-            guard let self, Self.allowedSource(request), request.routeParameters["token"] == self.token else {
+            guard let self, Self.allowedSource(request), request.routeParameters["token"] == self.operatorToken else {
                 return HTTPResponse(statusCode: .notFound)
             }
             let host = request.headers[HTTPHeader("Host")] ?? "localhost:\(self.port)"
+            // Only the machine token reaches the remote — never the operator token.
             let script = EmbeddedScripts.installScript
                 .replacingOccurrences(of: "__SERVER__", with: "http://\(host)")
-                .replacingOccurrences(of: "__TOKEN__", with: self.token)
+                .replacingOccurrences(of: "__TOKEN__", with: self.machineToken)
             return HTTPResponse(statusCode: .ok, headers: [HTTPHeader("Content-Type"): "text/plain"],
                                 body: Data(script.utf8))
         }
 
         await server.appendRoute("GET /install/hook?token=:token") { [weak self] request in
-            guard let self, Self.allowedSource(request), request.routeParameters["token"] == self.token else {
+            guard let self, Self.allowedSource(request), request.routeParameters["token"] == self.operatorToken else {
                 return HTTPResponse(statusCode: .notFound)
             }
             return HTTPResponse(statusCode: .ok, headers: [HTTPHeader("Content-Type"): "text/plain"],
@@ -208,11 +230,17 @@ enum LocalSetup {
             command = "\"$HOME/.notch/notch-hook.sh\""
         }
 
+        // Fail closed: never overwrite an existing settings file we can't parse —
+        // a malformed file could otherwise silently lose the user's other hooks.
         var settings: [String: Any] = [:]
-        if let data = try? Data(contentsOf: settingsURL),
-           let parsed = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
+        if let data = try? Data(contentsOf: settingsURL) {
+            try data.write(to: settingsURL.appendingPathExtension("notch-backup")) // raw backup first
+            guard let parsed = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+                throw NSError(domain: "notch", code: 2, userInfo: [
+                    NSLocalizedDescriptionKey: "~/.claude/settings.json is not valid JSON; left untouched (backup written)"
+                ])
+            }
             settings = parsed
-            try? data.write(to: settingsURL.appendingPathExtension("notch-backup"))
         }
         var hooks = settings["hooks"] as? [String: Any] ?? [:]
 

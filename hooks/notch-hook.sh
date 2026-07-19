@@ -8,7 +8,13 @@
 set -u
 
 MODE="${1:-event}"
+# Caller-provided env wins over ~/.notch/env (matches the compiled notch-hook).
+_ns="${NOTCH_SERVER-}"; _nt="${NOTCH_TOKEN-}"; _nm="${NOTCH_MACHINE-}"; _nr="${NOTCH_REMOTE_APPROVE-}"
 [ -f "$HOME/.notch/env" ] && . "$HOME/.notch/env"
+[ -n "$_ns" ] && NOTCH_SERVER="$_ns"
+[ -n "$_nt" ] && NOTCH_TOKEN="$_nt"
+[ -n "$_nm" ] && NOTCH_MACHINE="$_nm"
+[ -n "$_nr" ] && NOTCH_REMOTE_APPROVE="$_nr"
 NOTCH_SERVER="${NOTCH_SERVER:-http://localhost:4519}"
 NOTCH_TOKEN="${NOTCH_TOKEN:-dev-token}"
 NOTCH_MACHINE="${NOTCH_MACHINE:-$(hostname -s)}"

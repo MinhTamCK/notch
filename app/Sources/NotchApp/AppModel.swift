@@ -22,7 +22,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var mode: Mode = .client
     @Published private(set) var updateAvailable: (version: String, url: String)?
 
-    var token = ""
+    var token = ""            // machine role
+    var operatorToken = ""    // operator role (dashboard / decisions)
     private(set) var hostedPort: UInt16 = 4519
     private var embedded: EmbeddedServer?
     private var sweepTask: Task<Void, Never>?
@@ -57,7 +58,15 @@ final class AppModel: ObservableObject {
     // MARK: Config
 
     /// Reads ~/.notch/env (same file the hooks use); falls back to local defaults.
-    static func loadConfig() -> (server: String, token: String, staleMinutes: Double, retainHours: Double) {
+    struct Config {
+        var server: String
+        var machineToken: String
+        var operatorToken: String
+        var staleMinutes: Double
+        var retainHours: Double
+    }
+
+    static func loadConfig() -> Config {
         var values: [String: String] = [:]
         let envFile = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".notch/env")
@@ -69,11 +78,13 @@ final class AppModel: ObservableObject {
                 values[key] = parts[1].trimmingCharacters(in: CharacterSet(charactersIn: " \"'"))
             }
         }
-        return (
-            values["NOTCH_SERVER"] ?? "http://localhost:4519",
-            values["NOTCH_TOKEN"] ?? "dev-token",
-            Double(values["NOTCH_STALE_MINUTES"] ?? "") ?? 15,
-            Double(values["NOTCH_RETAIN_HOURS"] ?? "") ?? 6
+        let machine = values["NOTCH_TOKEN"] ?? "dev-token"
+        return Config(
+            server: values["NOTCH_SERVER"] ?? "http://localhost:4519",
+            machineToken: machine,
+            operatorToken: values["NOTCH_OPERATOR_TOKEN"] ?? machine,
+            staleMinutes: Double(values["NOTCH_STALE_MINUTES"] ?? "") ?? 15,
+            retainHours: Double(values["NOTCH_RETAIN_HOURS"] ?? "") ?? 6
         )
     }
 
@@ -85,7 +96,8 @@ final class AppModel: ObservableObject {
     func start() {
         Self.ensureEnvFile()
         let config = Self.loadConfig()
-        token = config.token
+        token = config.machineToken
+        operatorToken = config.operatorToken
         staleAfterMs = config.staleMinutes * 60 * 1000
         retainFinishedMs = config.retainHours * 60 * 60 * 1000
         serverDescription = config.server
@@ -106,7 +118,8 @@ final class AppModel: ObservableObject {
                 self.connect() // an external server (e.g. headless Node) owns the port
                 return
             }
-            let server = EmbeddedServer(model: self, token: config.token, port: port)
+            let server = EmbeddedServer(model: self, machineToken: config.machineToken,
+                                        operatorToken: config.operatorToken, port: port)
             do {
                 try await server.start()
                 self.embedded = server
@@ -120,22 +133,60 @@ final class AppModel: ObservableObject {
         }
     }
 
-    nonisolated static func ensureEnvFile() {
-        let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".notch")
-        let file = dir.appendingPathComponent("env")
-        guard !FileManager.default.fileExists(atPath: file.path) else { return }
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    nonisolated static func randomToken() -> String {
         var bytes = [UInt8](repeating: 0, count: 16)
         _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
-        let newToken = bytes.map { String(format: "%02x", $0) }.joined()
+        return bytes.map { String(format: "%02x", $0) }.joined()
+    }
+
+    private nonisolated static var notchDir: URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".notch")
+    }
+
+    /// Tighten ~/.notch to 0700 and env to 0600 so no other local account can read
+    /// the tokens regardless of umask (findings: secret file permissions).
+    nonisolated static func lockDownPermissions() {
+        let fm = FileManager.default
+        try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: notchDir.path)
+        let env = notchDir.appendingPathComponent("env").path
+        if fm.fileExists(atPath: env) {
+            try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: env)
+        }
+    }
+
+    nonisolated static func ensureEnvFile() {
+        let dir = notchDir
+        let file = dir.appendingPathComponent("env")
+        let fm = FileManager.default
+
+        if fm.fileExists(atPath: file.path) {
+            migrateOperatorToken(file)
+            lockDownPermissions()
+            return
+        }
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true,
+                                attributes: [.posixPermissions: 0o700])
         let hostname = ProcessInfo.processInfo.hostName.split(separator: ".").first.map(String.init) ?? "mac"
         let content = """
         NOTCH_SERVER="http://localhost:4519"
-        NOTCH_TOKEN="\(newToken)"
+        NOTCH_TOKEN="\(randomToken())"
+        NOTCH_OPERATOR_TOKEN="\(randomToken())"
         NOTCH_MACHINE="\(hostname)"
         NOTCH_REMOTE_APPROVE=1
         """
         try? content.write(to: file, atomically: true, encoding: .utf8)
+        lockDownPermissions()
+    }
+
+    /// Existing installs predate the operator token — add one so this host can
+    /// decide while remote machines keep only the (machine) NOTCH_TOKEN.
+    private nonisolated static func migrateOperatorToken(_ file: URL) {
+        guard var text = try? String(contentsOf: file, encoding: .utf8),
+              !text.contains("NOTCH_OPERATOR_TOKEN")
+        else { return }
+        if !text.hasSuffix("\n") { text += "\n" }
+        text += "NOTCH_OPERATOR_TOKEN=\"\(randomToken())\"\n"
+        try? text.write(to: file, atomically: true, encoding: .utf8)
     }
 
     // MARK: Updates
@@ -198,7 +249,8 @@ final class AppModel: ObservableObject {
         }
         components.scheme = components.scheme == "https" ? "wss" : "ws"
         components.path = "/ws"
-        components.queryItems = [URLQueryItem(name: "token", value: config.token)]
+        // The dashboard WebSocket is an operator right.
+        components.queryItems = [URLQueryItem(name: "token", value: config.operatorToken)]
         guard let url = components.url else {
             connection = .disconnected
             retryConnectLater()

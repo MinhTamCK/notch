@@ -76,6 +76,23 @@ function trunc(s: unknown, n: number): string | undefined {
   return s.length > n ? s.slice(0, n) + '…' : s
 }
 
+/** Metadata-only view of a hook envelope for the default (privacy-preserving) log. */
+function redact(data: unknown): unknown {
+  if (!data || typeof data !== 'object') return data
+  const env = data as HookEnvelope
+  const event = env.event ?? {}
+  return {
+    machine: env.machine,
+    agent: env.agent,
+    session_id: event.session_id,
+    hook_event_name: event.hook_event_name,
+    tool_name: event.tool_name,
+    // Never the command/prompt/file contents — just the fact that they existed.
+    has_tool_input: event.tool_input != null,
+    has_prompt: event.prompt != null,
+  }
+}
+
 /// Slash-command invocations arrive as XML-ish wrappers; show the command itself
 /// instead of raw markup. Ordinary prompts pass through untouched.
 function cleanPrompt(p: unknown): string | undefined {
@@ -103,8 +120,11 @@ export class Store {
   private listeners: ((msg: ChangeMessage) => void)[] = []
   private logFile: string
 
+  // Raw prompts/commands/file contents are only logged when explicitly opted in.
+  private logPayloads = process.env.NOTCH_LOG_PAYLOADS === '1'
+
   constructor(dataDir: string) {
-    mkdirSync(dataDir, { recursive: true })
+    mkdirSync(dataDir, { recursive: true, mode: 0o700 })
     this.logFile = path.join(dataDir, 'events.jsonl')
   }
 
@@ -117,7 +137,8 @@ export class Store {
   }
 
   private log(kind: string, data: unknown) {
-    appendFile(this.logFile, JSON.stringify({ ts: Date.now(), kind, data }) + '\n').catch(() => {})
+    const entry = this.logPayloads ? { ts: Date.now(), kind, data } : { ts: Date.now(), kind, meta: redact(data) }
+    appendFile(this.logFile, JSON.stringify(entry) + '\n', { mode: 0o600 }).catch(() => {})
   }
 
   snapshot() {
