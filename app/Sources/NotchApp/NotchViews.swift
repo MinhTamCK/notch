@@ -317,6 +317,11 @@ struct ExpandedView: View {
                 Image(systemName: showSettings ? "xmark.circle.fill" : "gearshape.fill")
                     .font(.caption)
                     .foregroundStyle(showSettings ? Color.white : Color.secondary)
+                    .overlay(alignment: .topTrailing) {
+                        if model.updateAvailable != nil, !showSettings {
+                            Circle().fill(.orange).frame(width: 5, height: 5).offset(x: 2, y: -2)
+                        }
+                    }
             }
             .buttonStyle(.plain)
             .help(showSettings ? "Back to sessions" : "Settings")
@@ -337,6 +342,19 @@ struct SettingsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if let update = model.updateAvailable {
+                settingRow(
+                    title: "Update available",
+                    subtitle: "Notch v\(update.version) is out"
+                ) {
+                    Button("Download") {
+                        if let url = URL(string: update.url) { NSWorkspace.shared.open(url) }
+                    }
+                    .buttonStyle(PillButtonStyle(prominent: true))
+                }
+                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.orange.opacity(0.4), lineWidth: 1))
+            }
+
             settingRow(
                 title: model.mode == .hosting ? "Server" : "Connection",
                 subtitle: model.serverDescription
@@ -409,6 +427,7 @@ struct SettingsSection: View {
             }
             .padding(.top, 2)
         }
+        .onAppear { model.checkForUpdates() }
     }
 
     private func settingRow(

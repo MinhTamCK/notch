@@ -20,6 +20,7 @@ final class AppModel: ObservableObject {
         didSet { UserDefaults.standard.set(soundEnabled, forKey: "soundEnabled") }
     }
     @Published private(set) var mode: Mode = .client
+    @Published private(set) var updateAvailable: (version: String, url: String)?
 
     var token = ""
     private(set) var hostedPort: UInt16 = 4519
@@ -88,6 +89,7 @@ final class AppModel: ObservableObject {
         staleAfterMs = config.staleMinutes * 60 * 1000
         retainFinishedMs = config.retainHours * 60 * 60 * 1000
         serverDescription = config.server
+        checkForUpdates()
 
         guard let url = URL(string: config.server),
               let host = url.host,
@@ -134,6 +136,42 @@ final class AppModel: ObservableObject {
         NOTCH_REMOTE_APPROVE=1
         """
         try? content.write(to: file, atomically: true, encoding: .utf8)
+    }
+
+    // MARK: Updates
+
+    private static let githubRepo = "MinhTamCK/notch"
+
+    /// Checks the newest GitHub release; sets `updateAvailable` when it beats the
+    /// running version. Silently a no-op while the repo is private (API 404s).
+    func checkForUpdates() {
+        Task { [weak self] in
+            guard let url = URL(string: "https://api.github.com/repos/\(Self.githubRepo)/releases/latest") else { return }
+            var request = URLRequest(url: url, timeoutInterval: 5)
+            request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+            guard let (data, response) = try? await URLSession.shared.data(for: request),
+                  (response as? HTTPURLResponse)?.statusCode == 200,
+                  let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                  let tag = json["tag_name"] as? String,
+                  let page = json["html_url"] as? String
+            else { return }
+            let latest = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
+            let current = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
+            if Self.isNewer(latest, than: current) {
+                await MainActor.run { self?.updateAvailable = (latest, page) }
+            }
+        }
+    }
+
+    nonisolated static func isNewer(_ a: String, than b: String) -> Bool {
+        let pa = a.split(separator: ".").map { Int($0) ?? 0 }
+        let pb = b.split(separator: ".").map { Int($0) ?? 0 }
+        for i in 0..<max(pa.count, pb.count) {
+            let x = i < pa.count ? pa[i] : 0
+            let y = i < pb.count ? pb[i] : 0
+            if x != y { return x > y }
+        }
+        return false
     }
 
     nonisolated static func isHealthy(_ server: String) async -> Bool {
