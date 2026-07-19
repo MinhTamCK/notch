@@ -176,9 +176,9 @@ struct CompactTrailingView: View {
                 Image(systemName: "wifi.slash")
                     .foregroundStyle(.secondary)
             } else {
-                Text("👾")
-                    .font(.system(size: 11))
-                    .opacity(0.85)
+                Circle()
+                    .fill(.green.opacity(0.7))
+                    .frame(width: 6, height: 6)
             }
         }
         .font(.caption)
