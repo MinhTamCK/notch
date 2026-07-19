@@ -51,7 +51,7 @@ jq --arg ev "$HOOK_CMD_EVENT" --arg perm "$HOOK_CMD_PERM" '
   | .hooks.PostToolUse       = (((.hooks.PostToolUse // [])       | strip) + [{hooks: [{type: "command", command: $ev}]}])
   | .hooks.Stop              = (((.hooks.Stop // [])              | strip) + [{hooks: [{type: "command", command: $ev}]}])
   | .hooks.SessionEnd        = (((.hooks.SessionEnd // [])        | strip) + [{hooks: [{type: "command", command: $ev}]}])
-  | .hooks.PreToolUse        = (((.hooks.PreToolUse // [])        | strip) + [{matcher: "Bash|Write|Edit|MultiEdit|ExitPlanMode", hooks: [{type: "command", command: $perm, timeout: 60}]}])
+  | .hooks.PreToolUse        = (((.hooks.PreToolUse // [])        | strip) + [{matcher: "Bash|Write|Edit|MultiEdit|ExitPlanMode", hooks: [{type: "command", command: $perm, timeout: 60}]}, {matcher: "AskUserQuestion", hooks: [{type: "command", command: $ev}]}])
 ' "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
 
 echo "hooks merged into $SETTINGS (backup at $SETTINGS.notch-backup)"

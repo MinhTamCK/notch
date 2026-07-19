@@ -105,6 +105,17 @@ function cleanPrompt(p: unknown): string | undefined {
   return trunc(p, 200)
 }
 
+export function describeQuestion(input?: Record<string, unknown>): string | undefined {
+  const questions = input?.questions as Array<Record<string, unknown>> | undefined
+  const first = questions?.[0]
+  if (!first) return undefined
+  const q = (first.question as string) ?? (first.header as string) ?? 'Question'
+  const opts = ((first.options as Array<Record<string, unknown>>) ?? [])
+    .map(o => o.label as string)
+    .filter(Boolean)
+  return trunc(opts.length ? `${q} · ${opts.slice(0, 4).join(' / ')}` : q, 300)
+}
+
 function describeTool(name: string, input?: Record<string, unknown>): string {
   if (name === 'Bash') return trunc(`$ ${input?.command ?? ''}`, 120) ?? name
   if (name === 'Write' || name === 'Edit' || name === 'MultiEdit')
@@ -197,6 +208,13 @@ export class Store {
         s.lastMessage = cleanPrompt(env.event.prompt)
         break
       case 'PreToolUse':
+        if (env.event.tool_name === 'AskUserQuestion') {
+          // Claude is waiting for you to pick an option — surface it, don't say "working".
+          s.state = 'needs_attention'
+          s.lastMessage = describeQuestion(env.event.tool_input) ?? 'Claude is asking you a question'
+          break
+        }
+      // falls through to the generic tool handling below
       case 'PostToolUse':
         if (!this.hasPendingPermission(s)) s.state = 'working'
         if (env.event.tool_name) s.lastTool = describeTool(env.event.tool_name, env.event.tool_input)

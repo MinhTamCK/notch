@@ -413,6 +413,15 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Turns an AskUserQuestion payload into a one-line "question · optA / optB" summary.
+    private func describeQuestion(_ input: JSONValue?) -> String? {
+        guard let first = input?["questions"]?.arrayValue?.first else { return nil }
+        let q = first["question"]?.stringValue ?? first["header"]?.stringValue ?? "Question"
+        let opts = (first["options"]?.arrayValue ?? []).compactMap { $0["label"]?.stringValue }
+        let summary = opts.isEmpty ? q : "\(q) · \(opts.prefix(4).joined(separator: " / "))"
+        return trunc(summary, 300)
+    }
+
     private func hasPendingPermission(_ key: String) -> Bool {
         (sessionPendingIds[key] ?? []).contains { pendingPermissions[$0] != nil }
     }
@@ -449,6 +458,10 @@ final class AppModel: ObservableObject {
         case "UserPromptSubmit":
             s.state = .working
             s.lastMessage = cleanPrompt(env.event.prompt)
+        case "PreToolUse" where env.event.tool_name == "AskUserQuestion":
+            // Claude is asking you to pick an option — it's waiting on you, not "working".
+            s.state = .needsAttention
+            s.lastMessage = describeQuestion(env.event.tool_input) ?? "Claude is asking you a question"
         case "PreToolUse", "PostToolUse":
             if !hasPendingPermission(key) { s.state = .working }
             if let tool = env.event.tool_name { s.lastTool = describeTool(tool, env.event.tool_input) }

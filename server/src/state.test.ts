@@ -1,5 +1,24 @@
 import { describe, it, expect } from 'vitest'
-import { redact } from './state.js'
+import { redact, describeQuestion } from './state.js'
+
+describe('describeQuestion', () => {
+  it('summarizes the question with its option labels', () => {
+    const out = describeQuestion({
+      questions: [{ question: 'Which next step?', options: [{ label: 'Release' }, { label: 'Tests' }] }],
+    })
+    expect(out).toBe('Which next step? · Release / Tests')
+  })
+
+  it('falls back to header when there is no question text, and to just the question with no options', () => {
+    expect(describeQuestion({ questions: [{ header: 'Next', options: [] }] })).toBe('Next')
+    expect(describeQuestion({ questions: [{ question: 'Proceed?' }] })).toBe('Proceed?')
+  })
+
+  it('returns undefined when there are no questions', () => {
+    expect(describeQuestion({})).toBeUndefined()
+    expect(describeQuestion(undefined)).toBeUndefined()
+  })
+})
 
 describe('redact', () => {
   it('keeps only metadata, never prompt/command/file content', () => {

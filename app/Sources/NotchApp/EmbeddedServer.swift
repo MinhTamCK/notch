@@ -257,6 +257,8 @@ enum LocalSetup {
         }
         hooks["PreToolUse"] = stripped(hooks["PreToolUse"])
             + [entry(mode: "permission", matcher: "Bash|Write|Edit|MultiEdit|ExitPlanMode", timeout: 60)]
+            // AskUserQuestion isn't a permission (no allow/deny) — report it non-blocking so the notch alerts.
+            + [entry(mode: "event", matcher: "AskUserQuestion")]
         settings["hooks"] = hooks
 
         let output = try JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys])

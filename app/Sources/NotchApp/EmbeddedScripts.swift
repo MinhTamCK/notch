@@ -122,7 +122,7 @@ enum EmbeddedScripts {
       | .hooks.PostToolUse       = (((.hooks.PostToolUse // [])       | strip) + [{hooks: [{type: "command", command: $ev}]}])
       | .hooks.Stop              = (((.hooks.Stop // [])              | strip) + [{hooks: [{type: "command", command: $ev}]}])
       | .hooks.SessionEnd        = (((.hooks.SessionEnd // [])        | strip) + [{hooks: [{type: "command", command: $ev}]}])
-      | .hooks.PreToolUse        = (((.hooks.PreToolUse // [])        | strip) + [{matcher: "Bash|Write|Edit|MultiEdit|ExitPlanMode", hooks: [{type: "command", command: $perm, timeout: 60}]}])
+      | .hooks.PreToolUse        = (((.hooks.PreToolUse // [])        | strip) + [{matcher: "Bash|Write|Edit|MultiEdit|ExitPlanMode", hooks: [{type: "command", command: $perm, timeout: 60}]}, {matcher: "AskUserQuestion", hooks: [{type: "command", command: $ev}]}])
     ' "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
 
     echo "done — new Claude Code sessions on this machine report to __SERVER__"
