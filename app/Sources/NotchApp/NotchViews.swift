@@ -91,6 +91,7 @@ struct EqualizerBars: View {
 struct AgentBadge: View {
     let agent: String?
     var dimmed = false
+    var size: CGFloat = 20
 
     private static var cache: [String: NSImage] = [:]
 
@@ -100,19 +101,19 @@ struct AgentBadge: View {
                 Image(nsImage: image)
                     .resizable()
                     .interpolation(.high)
-                    .clipShape(RoundedRectangle(cornerRadius: 5))
+                    .clipShape(RoundedRectangle(cornerRadius: size * 0.25))
             } else {
                 let style = Self.style(agent)
                 ZStack {
-                    RoundedRectangle(cornerRadius: 5)
+                    RoundedRectangle(cornerRadius: size * 0.25)
                         .fill(style.color.opacity(0.18))
                     Text(style.glyph)
-                        .font(.system(size: 11, weight: .bold))
+                        .font(.system(size: size * 0.55, weight: .bold))
                         .foregroundStyle(style.color)
                 }
             }
         }
-        .frame(width: 20, height: 20)
+        .frame(width: size, height: size)
         .opacity(dimmed ? 0.5 : 1)
     }
 
@@ -161,6 +162,16 @@ struct CompactLeadingView: View {
 struct CompactTrailingView: View {
     @ObservedObject var model: AppModel
 
+    /// Unique agents currently in the session list, most recent first.
+    private var activeAgents: [String] {
+        var seen = Set<String>()
+        var agents: [String] = []
+        for session in model.visibleSessions where seen.insert(session.agent).inserted {
+            agents.append(session.agent)
+        }
+        return Array(agents.prefix(3))
+    }
+
     var body: some View {
         Group {
             if model.attentionCount > 0 {
@@ -175,10 +186,12 @@ struct CompactTrailingView: View {
             } else if model.connection != .connected {
                 Image(systemName: "wifi.slash")
                     .foregroundStyle(.secondary)
-            } else {
-                Circle()
-                    .fill(.green.opacity(0.7))
-                    .frame(width: 6, height: 6)
+            } else if !activeAgents.isEmpty {
+                HStack(spacing: 3) {
+                    ForEach(activeAgents, id: \.self) { agent in
+                        AgentBadge(agent: agent, size: 13)
+                    }
+                }
             }
         }
         .font(.caption)
