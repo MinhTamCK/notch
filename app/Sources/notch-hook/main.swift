@@ -103,7 +103,25 @@ func translateCursor(_ raw: [String: Any]) -> [String: Any] {
 }
 
 let stdinData = FileHandle.standardInput.readDataToEndOfFile()
+
+// NOTCH_DEBUG=1 in ~/.notch/env dumps raw payloads for diagnosing agent quirks.
+if cfg("NOTCH_DEBUG", "0") == "1" {
+    let logURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".notch/hook-debug.log")
+    let line = "[\(mode)] " + (String(data: stdinData, encoding: .utf8) ?? "?") + "\n"
+    if let handle = try? FileHandle(forWritingTo: logURL) {
+        handle.seekToEndOfFile()
+        handle.write(Data(line.utf8))
+        try? handle.close()
+    } else {
+        try? line.write(to: logURL, atomically: true, encoding: .utf8)
+    }
+}
+
 guard let raw = (try? JSONSerialization.jsonObject(with: stdinData)) as? [String: Any] else { exit(0) }
+
+// Cursor background/auxiliary agents are noise in the session list.
+if isCursor, raw["is_background_agent"] as? Bool == true { exit(0) }
+
 let event = isCursor ? translateCursor(raw) : raw
 
 let envelope: [String: Any] = [

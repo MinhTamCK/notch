@@ -382,6 +382,13 @@ final class AppModel: ObservableObject {
     }
 
     func applyEnvelope(_ env: HookEnvelope) -> Bool {
+        // Terminal events for sessions we never saw are noise (e.g. Cursor emits
+        // stop under a different conversation id) — never materialize a row from them.
+        if let sid = env.event.session_id,
+           sessions["\(env.machine):\(sid)"] == nil,
+           ["Stop", "SessionEnd"].contains(env.event.hook_event_name ?? "") {
+            return true
+        }
         guard let key = upsertSession(env), var s = sessions[key] else { return false }
         let previous = s.state
         switch env.event.hook_event_name {

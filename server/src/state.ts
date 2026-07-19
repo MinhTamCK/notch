@@ -158,6 +158,14 @@ export class Store {
   handleEvent(env: HookEnvelope): Session | undefined {
     if (!env?.machine || !env.event?.session_id) return undefined
     this.log('event', env)
+    // Never materialize a session from a terminal event (phantom "done" rows).
+    const name = env.event.hook_event_name ?? ''
+    if (
+      (name === 'Stop' || name === 'SessionEnd') &&
+      !this.sessions.has(`${env.machine}:${env.event.session_id}`)
+    ) {
+      return undefined
+    }
     const s = this.upsert(env)
     switch (env.event.hook_event_name) {
       case 'SessionStart':
