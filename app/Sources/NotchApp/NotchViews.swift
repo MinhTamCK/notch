@@ -264,7 +264,7 @@ struct ExpandedView: View {
             }
             }
         }
-        .padding(12)
+        .padding(6)
         .frame(width: 400)
         .contentShape(Rectangle())
         // Tap anywhere in the panel to collapse; buttons and links still win.
