@@ -219,10 +219,16 @@ export class Store {
         if (!this.hasPendingPermission(s)) s.state = 'working'
         if (env.event.tool_name) s.lastTool = describeTool(env.event.tool_name, env.event.tool_input)
         break
-      case 'Notification':
-        if (!this.hasPendingPermission(s)) s.state = 'needs_attention'
-        s.lastMessage = trunc(env.event.message, 300)
+      case 'Notification': {
+        const msg = env.event.message ?? ''
+        // "waiting for your input" is the idle "your turn" ping — not an action to
+        // confirm, so don't force-expand or hold the panel open for it.
+        if (!msg.toLowerCase().includes('waiting for your input') && !this.hasPendingPermission(s)) {
+          s.state = 'needs_attention'
+        }
+        s.lastMessage = trunc(msg, 300)
         break
+      }
       case 'Stop':
         s.state = 'done'
         break

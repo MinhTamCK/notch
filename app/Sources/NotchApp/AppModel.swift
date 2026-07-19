@@ -466,8 +466,13 @@ final class AppModel: ObservableObject {
             if !hasPendingPermission(key) { s.state = .working }
             if let tool = env.event.tool_name { s.lastTool = describeTool(tool, env.event.tool_input) }
         case "Notification":
-            if !hasPendingPermission(key) { s.state = .needsAttention }
-            s.lastMessage = trunc(env.event.message, 300)
+            let msg = env.event.message ?? ""
+            // "waiting for your input" is the idle "your turn" ping — not an action to
+            // confirm, so don't force-expand or hold the panel open for it.
+            if !msg.lowercased().contains("waiting for your input"), !hasPendingPermission(key) {
+                s.state = .needsAttention
+            }
+            s.lastMessage = trunc(msg, 300)
         case "Stop":
             s.state = .done
         case "SessionEnd":
