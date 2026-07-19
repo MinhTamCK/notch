@@ -60,10 +60,15 @@ func request(_ method: String, _ path: String, body: [String: Any]?, timeout: Ti
 }
 
 /// Map Cursor's hook schema onto the Claude Code-shaped events the server speaks.
+/// Cursor splits one chat across multiple conversation ids (outer chat for
+/// prompt/stop, inner loop for tools), so we key sessions by WORKSPACE instead —
+/// one row per project, which is also how you think about Cursor.
 func translateCursor(_ raw: [String: Any]) -> [String: Any] {
     var event: [String: Any] = [:]
-    event["session_id"] = raw["conversation_id"] as? String ?? raw["session_id"] as? String ?? "cursor"
-    event["cwd"] = raw["cwd"] as? String ?? (raw["workspace_roots"] as? [String])?.first
+    let workspace = (raw["workspace_roots"] as? [String])?.first
+    event["session_id"] = workspace.map { "ws:\($0)" }
+        ?? raw["conversation_id"] as? String ?? raw["session_id"] as? String ?? "cursor"
+    event["cwd"] = workspace ?? raw["cwd"] as? String
 
     switch raw["hook_event_name"] as? String {
     case "sessionStart":
