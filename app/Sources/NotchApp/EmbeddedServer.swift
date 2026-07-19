@@ -46,27 +46,32 @@ final class EmbeddedServer {
         }
     }
 
-    private func bearer(_ request: HTTPRequest) -> String? {
-        request.headers[HTTPHeader("Authorization")]?.replacingOccurrences(of: "Bearer ", with: "")
-    }
-
     private static let maxBodyBytes = 256 * 1024
 
     private func withinSizeLimit(_ request: HTTPRequest) -> Bool {
-        guard let len = request.headers[HTTPHeader("Content-Length")].flatMap({ Int($0) }) else { return true }
+        guard let len = request.headers[HTTPHeader("Content-Length")].flatMap({ Int($0) }) else {
+            // No Content-Length on a body-bearing method is suspicious — reject.
+            return request.method == .GET
+        }
         return len <= Self.maxBodyBytes
     }
 
-    /// Machine role: report events, open + poll permissions. Operator implies it.
-    private func machineOK(_ request: HTTPRequest) -> Bool {
-        guard Self.allowedSource(request), withinSizeLimit(request), let t = bearer(request) else { return false }
-        return t == machineToken || t == operatorToken
+    private func auth(_ request: HTTPRequest, requiresOperator: Bool) -> Bool {
+        Self.allowedSource(request)
+            && withinSizeLimit(request)
+            && RoleAuth.allows(
+                bearer: request.headers[HTTPHeader("Authorization")],
+                requiresOperator: requiresOperator,
+                machineToken: machineToken,
+                operatorToken: operatorToken
+            )
     }
 
+    /// Machine role: report events, open + poll permissions. Operator implies it.
+    private func machineOK(_ request: HTTPRequest) -> Bool { auth(request, requiresOperator: false) }
+
     /// Operator role: list sessions and decide — never granted to a reporting machine.
-    private func operatorOK(_ request: HTTPRequest) -> Bool {
-        Self.allowedSource(request) && bearer(request) == operatorToken
-    }
+    private func operatorOK(_ request: HTTPRequest) -> Bool { auth(request, requiresOperator: true) }
 
     private func json(_ object: Any, status: HTTPStatusCode = .ok) -> HTTPResponse {
         let data = (try? JSONSerialization.data(withJSONObject: object)) ?? Data()
@@ -271,11 +276,17 @@ enum LocalSetup {
         let hooksURL = cursorDir.appendingPathComponent("hooks.json")
         let binary = fm.homeDirectoryForCurrentUser.appendingPathComponent(".notch/notch-hook").path
 
+        // Fail closed like the Claude settings path: back up raw bytes and refuse to
+        // overwrite an existing hooks.json we can't parse (would lose the user's hooks).
         var root: [String: Any] = ["version": 1]
-        if let data = try? Data(contentsOf: hooksURL),
-           let parsed = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
+        if let data = try? Data(contentsOf: hooksURL) {
+            try data.write(to: hooksURL.appendingPathExtension("notch-backup"))
+            guard let parsed = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+                throw NSError(domain: "notch", code: 3, userInfo: [
+                    NSLocalizedDescriptionKey: "~/.cursor/hooks.json is not valid JSON; left untouched (backup written)"
+                ])
+            }
             root = parsed
-            try? data.write(to: hooksURL.appendingPathExtension("notch-backup"))
         }
         var hooks = root["hooks"] as? [String: Any] ?? [:]
 

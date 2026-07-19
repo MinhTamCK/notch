@@ -81,7 +81,7 @@ final class AppModel: ObservableObject {
                 values[key] = parts[1].trimmingCharacters(in: CharacterSet(charactersIn: " \"'"))
             }
         }
-        let machine = values["NOTCH_TOKEN"] ?? "dev-token"
+        let machine = values["NOTCH_TOKEN"] ?? ""
         return Config(
             server: values["NOTCH_SERVER"] ?? "http://localhost:4519",
             machineToken: machine,

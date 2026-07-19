@@ -1,3 +1,22 @@
+// Auth + network policy, kept pure and side-effect-free so they are unit-testable.
+
+/**
+ * Bearer-token authorization for a given role. Operator implies machine rights.
+ * Empty tokens never authorize (defends against a misconfigured blank secret).
+ */
+export function authorizeRole(
+  authHeader: string | undefined,
+  role: 'machine' | 'operator',
+  tokens: { machineToken: string; operatorToken: string },
+): boolean {
+  if (!authHeader?.startsWith('Bearer ')) return false
+  const token = authHeader.slice(7)
+  if (!token) return false
+  if (tokens.operatorToken && token === tokens.operatorToken) return true
+  if (role === 'machine' && tokens.machineToken && token === tokens.machineToken) return true
+  return false
+}
+
 // Network source policy, kept pure and side-effect-free so it is unit-testable.
 // Only loopback and the Tailscale tailnet (100.64.0.0/10, fd7a:115c:a1e0::/48)
 // may talk to the server — LAN and internet sources are rejected outright.

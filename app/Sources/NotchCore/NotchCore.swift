@@ -19,6 +19,24 @@ public enum SourceFilter {
     }
 }
 
+public enum RoleAuth {
+    /// Bearer-token authorization. Operator implies machine rights. Empty tokens
+    /// never authorize (defends against a misconfigured blank secret).
+    public static func allows(
+        bearer authHeader: String?,
+        requiresOperator: Bool,
+        machineToken: String,
+        operatorToken: String
+    ) -> Bool {
+        guard let h = authHeader, h.hasPrefix("Bearer ") else { return false }
+        let token = String(h.dropFirst("Bearer ".count))
+        if token.isEmpty { return false }
+        if !operatorToken.isEmpty, token == operatorToken { return true }
+        if !requiresOperator, !machineToken.isEmpty, token == machineToken { return true }
+        return false
+    }
+}
+
 public enum Version {
     /// Semantic-ish comparison used by the update notifier ("0.3.1" > "0.3.0").
     public static func isNewer(_ a: String, than b: String) -> Bool {

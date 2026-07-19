@@ -16,7 +16,7 @@ _ns="${NOTCH_SERVER-}"; _nt="${NOTCH_TOKEN-}"; _nm="${NOTCH_MACHINE-}"; _nr="${N
 [ -n "$_nm" ] && NOTCH_MACHINE="$_nm"
 [ -n "$_nr" ] && NOTCH_REMOTE_APPROVE="$_nr"
 NOTCH_SERVER="${NOTCH_SERVER:-http://localhost:4519}"
-NOTCH_TOKEN="${NOTCH_TOKEN:-dev-token}"
+NOTCH_TOKEN="${NOTCH_TOKEN:-}"
 NOTCH_MACHINE="${NOTCH_MACHINE:-$(hostname -s)}"
 NOTCH_REMOTE_APPROVE="${NOTCH_REMOTE_APPROVE:-1}"
 

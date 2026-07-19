@@ -14,14 +14,19 @@ NODE_BIN="$(command -v node)" || { echo "error: node not found" >&2; exit 1; }
 [ -d "$SERVER_DIR/node_modules" ] || (cd "$SERVER_DIR" && npm install --no-fund --no-audit)
 
 mkdir -p "$HOME/.notch" "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
+chmod 700 "$HOME/.notch"
 if [ ! -f "$HOME/.notch/env" ]; then
-  cat > "$HOME/.notch/env" <<EOF
+  # Host holds both tokens: machine (report/xin phép) and operator (list/decide).
+  ( umask 077; cat > "$HOME/.notch/env" <<EOF
 NOTCH_SERVER="http://localhost:4519"
 NOTCH_TOKEN="$(openssl rand -hex 16)"
+NOTCH_OPERATOR_TOKEN="$(openssl rand -hex 16)"
 NOTCH_MACHINE="$(hostname -s)"
 NOTCH_REMOTE_APPROVE=1
 EOF
-  echo "wrote $HOME/.notch/env (new random token)"
+  )
+  chmod 600 "$HOME/.notch/env"
+  echo "wrote $HOME/.notch/env (new random tokens)"
 else
   echo "kept existing $HOME/.notch/env"
 fi
@@ -36,7 +41,7 @@ cat > "$PLIST" <<EOF
   <array>
     <string>/bin/sh</string>
     <string>-c</string>
-    <string>. "\$HOME/.notch/env"; export NOTCH_TOKEN NOTCH_PORT NOTCH_STALE_MINUTES NOTCH_RETAIN_HOURS; cd "$SERVER_DIR"; exec "$NODE_BIN" node_modules/.bin/tsx src/index.ts</string>
+    <string>. "\$HOME/.notch/env"; export NOTCH_TOKEN NOTCH_OPERATOR_TOKEN NOTCH_PORT NOTCH_STALE_MINUTES NOTCH_RETAIN_HOURS; cd "$SERVER_DIR"; exec "$NODE_BIN" node_modules/.bin/tsx src/index.ts</string>
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>

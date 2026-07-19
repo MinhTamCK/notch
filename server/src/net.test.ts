@@ -1,5 +1,32 @@
 import { describe, it, expect } from 'vitest'
-import { allowedSource } from './net.js'
+import { allowedSource, authorizeRole } from './net.js'
+
+describe('authorizeRole', () => {
+  const tokens = { machineToken: 'machine-secret-123456', operatorToken: 'operator-secret-654321' }
+
+  it('operator token may do machine AND operator actions', () => {
+    expect(authorizeRole(`Bearer ${tokens.operatorToken}`, 'machine', tokens)).toBe(true)
+    expect(authorizeRole(`Bearer ${tokens.operatorToken}`, 'operator', tokens)).toBe(true)
+  })
+
+  it('machine token may do machine actions but NOT operator actions', () => {
+    expect(authorizeRole(`Bearer ${tokens.machineToken}`, 'machine', tokens)).toBe(true)
+    expect(authorizeRole(`Bearer ${tokens.machineToken}`, 'operator', tokens)).toBe(false)
+  })
+
+  it('rejects wrong, missing, malformed, and empty-token headers', () => {
+    expect(authorizeRole('Bearer wrong', 'machine', tokens)).toBe(false)
+    expect(authorizeRole(undefined, 'machine', tokens)).toBe(false)
+    expect(authorizeRole('Basic xyz', 'machine', tokens)).toBe(false)
+    expect(authorizeRole('Bearer ', 'machine', tokens)).toBe(false)
+  })
+
+  it('never authorizes against a blank configured token', () => {
+    const blank = { machineToken: '', operatorToken: '' }
+    expect(authorizeRole('Bearer ', 'operator', blank)).toBe(false)
+    expect(authorizeRole('Bearer anything', 'machine', blank)).toBe(false)
+  })
+})
 
 describe('allowedSource', () => {
   it('allows loopback (v4 and v6)', () => {

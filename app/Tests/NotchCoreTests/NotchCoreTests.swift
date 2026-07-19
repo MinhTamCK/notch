@@ -33,6 +33,29 @@ struct SourceFilterTests {
     }
 }
 
+@Suite("RoleAuth — token authorization")
+struct RoleAuthTests {
+    let machine = "machine-secret-123456"
+    let op = "operator-secret-654321"
+
+    @Test func operatorMayDoEverything() {
+        #expect(RoleAuth.allows(bearer: "Bearer \(op)", requiresOperator: false, machineToken: machine, operatorToken: op))
+        #expect(RoleAuth.allows(bearer: "Bearer \(op)", requiresOperator: true, machineToken: machine, operatorToken: op))
+    }
+
+    @Test func machineMayNotDoOperatorActions() {
+        #expect(RoleAuth.allows(bearer: "Bearer \(machine)", requiresOperator: false, machineToken: machine, operatorToken: op))
+        #expect(!RoleAuth.allows(bearer: "Bearer \(machine)", requiresOperator: true, machineToken: machine, operatorToken: op))
+    }
+
+    @Test func rejectsWrongMissingBlank() {
+        #expect(!RoleAuth.allows(bearer: "Bearer wrong", requiresOperator: false, machineToken: machine, operatorToken: op))
+        #expect(!RoleAuth.allows(bearer: nil, requiresOperator: false, machineToken: machine, operatorToken: op))
+        #expect(!RoleAuth.allows(bearer: "Bearer ", requiresOperator: false, machineToken: machine, operatorToken: op))
+        #expect(!RoleAuth.allows(bearer: "Bearer x", requiresOperator: true, machineToken: "", operatorToken: ""))
+    }
+}
+
 @Suite("Version comparison")
 struct VersionTests {
     @Test func newer() {

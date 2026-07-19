@@ -28,7 +28,7 @@ func cfg(_ key: String, _ fallback: String) -> String {
 
 let mode = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "event"
 let server = cfg("NOTCH_SERVER", "http://localhost:4519")
-let token = cfg("NOTCH_TOKEN", "dev-token")
+let token = cfg("NOTCH_TOKEN", "")
 let machine = cfg("NOTCH_MACHINE", String(ProcessInfo.processInfo.hostName.split(separator: ".").first ?? "mac"))
 let remoteApprove = cfg("NOTCH_REMOTE_APPROVE", "1")
 let isCursor = mode.hasPrefix("cursor")

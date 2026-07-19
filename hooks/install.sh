@@ -16,16 +16,24 @@ HOOK_CMD_EVENT="\"\$HOME/.notch/notch-hook.sh\" event"
 HOOK_CMD_PERM="\"\$HOME/.notch/notch-hook.sh\" permission"
 
 mkdir -p "$NOTCH_DIR" "$HOME/.claude"
+chmod 700 "$NOTCH_DIR"
 install -m 755 "$SCRIPT_DIR/notch-hook.sh" "$NOTCH_DIR/notch-hook.sh"
 
 if [ ! -f "$NOTCH_DIR/env" ]; then
-  cat > "$NOTCH_DIR/env" <<EOF
+  # This remote machine gets only the machine token; require a real one.
+  if [ -z "${NOTCH_TOKEN:-}" ]; then
+    echo "error: set NOTCH_TOKEN=<host machine token> before running (see the app's Add Remote Machine)" >&2
+    exit 1
+  fi
+  ( umask 077; cat > "$NOTCH_DIR/env" <<EOF
 NOTCH_SERVER="${NOTCH_SERVER:-http://localhost:4519}"
-NOTCH_TOKEN="${NOTCH_TOKEN:-dev-token}"
+NOTCH_TOKEN="${NOTCH_TOKEN}"
 NOTCH_MACHINE="${NOTCH_MACHINE:-$(hostname -s)}"
 # Set to 0 to disable remote approval (monitor-only) on this machine:
 NOTCH_REMOTE_APPROVE=1
 EOF
+  )
+  chmod 600 "$NOTCH_DIR/env"
   echo "wrote $NOTCH_DIR/env"
 else
   echo "kept existing $NOTCH_DIR/env"

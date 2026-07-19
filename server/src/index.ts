@@ -5,7 +5,7 @@ import type { Server } from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Store, type Decision } from './state.js'
-import { allowedSource } from './net.js'
+import { allowedSource, authorizeRole } from './net.js'
 
 const PORT = Number(process.env.NOTCH_PORT ?? 4519)
 // Machine role: report events, open permission requests, poll own decision.
@@ -39,14 +39,17 @@ app.get('/health', c => c.json({ ok: true }))
 /** Bearer-token check for a given role. Operator implies machine rights. */
 function requireRole(role: 'machine' | 'operator') {
   return async (c: Parameters<Parameters<typeof app.use>[1]>[0], next: () => Promise<void>) => {
-    const auth = c.req.header('authorization')
-    const ok =
-      auth === `Bearer ${OPERATOR_TOKEN}` ||
-      (role === 'machine' && auth === `Bearer ${TOKEN}`)
-    if (!ok) return c.json({ error: 'unauthorized' }, 401)
-    // Cap body size before any handler reads it.
+    const tokens = { machineToken: TOKEN, operatorToken: OPERATOR_TOKEN }
+    if (!authorizeRole(c.req.header('authorization'), role, tokens)) {
+      return c.json({ error: 'unauthorized' }, 401)
+    }
+    // Cap body size before any handler reads it (Content-Length + chunked fallback).
     const len = Number(c.req.header('content-length') ?? 0)
     if (len > MAX_BODY_BYTES) return c.json({ error: 'payload too large' }, 413)
+    if (!c.req.header('content-length') && c.req.method !== 'GET') {
+      const buf = await c.req.arrayBuffer()
+      if (buf.byteLength > MAX_BODY_BYTES) return c.json({ error: 'payload too large' }, 413)
+    }
     await next()
   }
 }
