@@ -381,6 +381,7 @@ final class AppModel: ObservableObject {
             id: UUID().uuidString.lowercased(),
             machine: env.machine,
             sessionId: s.sessionId,
+            agent: env.agent ?? "claude-code",
             toolName: toolName,
             toolInput: env.event.tool_input,
             cwd: env.event.cwd,

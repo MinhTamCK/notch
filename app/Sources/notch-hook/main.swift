@@ -1,8 +1,10 @@
-// Dependency-free Claude Code hook for macOS (replaces the bash+jq script locally).
-//   notch-hook event       — fire-and-forget: report the hook event to the server
-//   notch-hook permission  — PreToolUse: ask the server for an allow/deny decision
-// Fails open on every path: any error exits 0 with no output so Claude Code
-// falls back to its normal terminal flow.
+// Dependency-free agent hook for macOS (replaces the bash+jq script locally).
+//   notch-hook event         — Claude Code: fire-and-forget event report
+//   notch-hook permission    — Claude Code PreToolUse: allow/deny gate (long-poll)
+//   notch-hook cursor-event  — Cursor: translate + report event
+//   notch-hook cursor-shell  — Cursor beforeShellExecution: allow/deny/ask gate
+// Fails safe on every path: Claude Code falls back to its terminal prompt;
+// Cursor gets an explicit {"permission":"ask"} (it fails OPEN otherwise).
 import Foundation
 
 func loadEnvFile() -> [String: String] {
@@ -28,16 +30,13 @@ let server = cfg("NOTCH_SERVER", "http://localhost:4519")
 let token = cfg("NOTCH_TOKEN", "dev-token")
 let machine = cfg("NOTCH_MACHINE", String(ProcessInfo.processInfo.hostName.split(separator: ".").first ?? "mac"))
 let remoteApprove = cfg("NOTCH_REMOTE_APPROVE", "1")
+let isCursor = mode.hasPrefix("cursor")
 
-let stdinData = FileHandle.standardInput.readDataToEndOfFile()
-guard let event = (try? JSONSerialization.jsonObject(with: stdinData)) as? [String: Any] else { exit(0) }
-
-let envelope: [String: Any] = [
-    "machine": machine,
-    "agent": "claude-code",
-    "ts": Int(Date().timeIntervalSince1970 * 1000),
-    "event": event,
-]
+func emit(_ object: [String: Any]) {
+    if let data = try? JSONSerialization.data(withJSONObject: object) {
+        FileHandle.standardOutput.write(data)
+    }
+}
 
 func request(_ method: String, _ path: String, body: [String: Any]?, timeout: TimeInterval) -> [String: Any]? {
     guard let url = URL(string: server + path) else { return nil }
@@ -60,36 +59,106 @@ func request(_ method: String, _ path: String, body: [String: Any]?, timeout: Ti
     return result
 }
 
-// Respect the session's permission mode: only gate tools Claude Code itself would prompt for.
-var effectiveMode = mode
-if mode == "permission" {
-    let pm = event["permission_mode"] as? String ?? "default"
-    let tool = event["tool_name"] as? String ?? ""
-    if ["bypassPermissions", "auto", "dontAsk"].contains(pm) { effectiveMode = "event" }
-    if pm == "acceptEdits", ["Edit", "Write", "MultiEdit"].contains(tool) { effectiveMode = "event" }
-    if remoteApprove == "0" { effectiveMode = "event" }
+/// Map Cursor's hook schema onto the Claude Code-shaped events the server speaks.
+func translateCursor(_ raw: [String: Any]) -> [String: Any] {
+    var event: [String: Any] = [:]
+    event["session_id"] = raw["conversation_id"] as? String ?? raw["session_id"] as? String ?? "cursor"
+    event["cwd"] = raw["cwd"] as? String ?? (raw["workspace_roots"] as? [String])?.first
+
+    switch raw["hook_event_name"] as? String {
+    case "sessionStart":
+        event["hook_event_name"] = "SessionStart"
+    case "beforeSubmitPrompt":
+        event["hook_event_name"] = "UserPromptSubmit"
+        event["prompt"] = raw["prompt"]
+    case "afterFileEdit":
+        event["hook_event_name"] = "PostToolUse"
+        event["tool_name"] = "Edit"
+        var toolInput: [String: Any] = ["file_path": raw["file_path"] ?? ""]
+        if let first = (raw["edits"] as? [[String: Any]])?.first {
+            toolInput["old_string"] = first["old_string"]
+            toolInput["new_string"] = first["new_string"]
+        }
+        event["tool_input"] = toolInput
+    case "preToolUse":
+        event["hook_event_name"] = "PreToolUse"
+        event["tool_name"] = raw["tool_name"]
+        event["tool_input"] = raw["tool_input"]
+    case "postToolUse":
+        event["hook_event_name"] = "PostToolUse"
+        event["tool_name"] = raw["tool_name"]
+        event["tool_input"] = raw["tool_input"]
+    case "beforeShellExecution":
+        event["hook_event_name"] = "PreToolUse"
+        event["tool_name"] = "Bash"
+        event["tool_input"] = ["command": raw["command"] ?? ""]
+    case "stop":
+        event["hook_event_name"] = "Stop"
+    case "sessionEnd":
+        event["hook_event_name"] = "SessionEnd"
+    default:
+        event["hook_event_name"] = raw["hook_event_name"] ?? "unknown"
+    }
+    return event
 }
 
-if effectiveMode == "permission" {
+let stdinData = FileHandle.standardInput.readDataToEndOfFile()
+guard let raw = (try? JSONSerialization.jsonObject(with: stdinData)) as? [String: Any] else { exit(0) }
+let event = isCursor ? translateCursor(raw) : raw
+
+let envelope: [String: Any] = [
+    "machine": machine,
+    "agent": isCursor ? "cursor" : "claude-code",
+    "ts": Int(Date().timeIntervalSince1970 * 1000),
+    "event": event,
+]
+
+func gate() -> (decision: String, reason: String)? {
     guard let created = request("POST", "/api/permissions", body: envelope, timeout: 3),
-          let id = created["id"] as? String
-    else { exit(0) }
-    guard let decided = request("GET", "/api/permissions/\(id)/decision?wait=55", body: nil, timeout: 58),
+          let id = created["id"] as? String,
+          let decided = request("GET", "/api/permissions/\(id)/decision?wait=55", body: nil, timeout: 58),
           let decision = decided["decision"] as? String,
           decision == "allow" || decision == "deny"
-    else { exit(0) }
-    let output: [String: Any] = [
-        "hookSpecificOutput": [
-            "hookEventName": "PreToolUse",
-            "permissionDecision": decision,
-            "permissionDecisionReason": decided["reason"] as? String ?? "Decided via Notch",
-        ],
-    ]
-    if let data = try? JSONSerialization.data(withJSONObject: output) {
-        FileHandle.standardOutput.write(data)
-    }
-    exit(0)
+    else { return nil }
+    return (decision, decided["reason"] as? String ?? "Decided via Notch")
 }
 
-_ = request("POST", "/api/events", body: envelope, timeout: 2)
+switch mode {
+case "permission":
+    // Respect Claude Code's permission mode: only gate tools it would prompt for.
+    let pm = raw["permission_mode"] as? String ?? "default"
+    let tool = raw["tool_name"] as? String ?? ""
+    let skip = ["bypassPermissions", "auto", "dontAsk"].contains(pm)
+        || (pm == "acceptEdits" && ["Edit", "Write", "MultiEdit"].contains(tool))
+        || remoteApprove == "0"
+    if skip {
+        _ = request("POST", "/api/events", body: envelope, timeout: 2)
+        exit(0)
+    }
+    guard let (decision, reason) = gate() else { exit(0) } // silent → terminal prompt
+    emit(["hookSpecificOutput": [
+        "hookEventName": "PreToolUse",
+        "permissionDecision": decision,
+        "permissionDecisionReason": reason,
+    ]])
+
+case "cursor-shell":
+    if remoteApprove == "0" {
+        _ = request("POST", "/api/events", body: envelope, timeout: 2)
+        exit(0) // no output: don't interfere with Cursor's own flow
+    }
+    if let (decision, reason) = gate() {
+        if decision == "allow" {
+            emit(["permission": "allow"])
+        } else {
+            emit(["permission": "deny", "user_message": reason, "agent_message": reason])
+        }
+    } else {
+        // Cursor fails OPEN on hook errors — hand back to its own prompt instead.
+        emit(["permission": "ask"])
+    }
+
+default: // event, cursor-event
+    _ = request("POST", "/api/events", body: envelope, timeout: 2)
+}
 exit(0)

@@ -77,6 +77,7 @@ struct PermissionRequest: Codable, Identifiable, Equatable {
     let id: String
     let machine: String
     let sessionId: String
+    let agent: String?
     let toolName: String
     let toolInput: JSONValue?
     let cwd: String?

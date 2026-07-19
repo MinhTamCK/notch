@@ -211,6 +211,45 @@ enum LocalSetup {
 
         let output = try JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys])
         try output.write(to: settingsURL)
+
+        // Cursor uses its own hooks.json; only the compiled binary speaks its dialect.
+        if command.contains("notch-hook\"") {
+            try? installCursorHooks()
+        }
+    }
+
+    /// Merge Notch entries into ~/.cursor/hooks.json (only if Cursor is present).
+    private static func installCursorHooks() throws {
+        let fm = FileManager.default
+        let cursorDir = fm.homeDirectoryForCurrentUser.appendingPathComponent(".cursor")
+        guard fm.fileExists(atPath: cursorDir.path) else { return }
+        let hooksURL = cursorDir.appendingPathComponent("hooks.json")
+        let binary = fm.homeDirectoryForCurrentUser.appendingPathComponent(".notch/notch-hook").path
+
+        var root: [String: Any] = ["version": 1]
+        if let data = try? Data(contentsOf: hooksURL),
+           let parsed = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
+            root = parsed
+            try? data.write(to: hooksURL.appendingPathExtension("notch-backup"))
+        }
+        var hooks = root["hooks"] as? [String: Any] ?? [:]
+
+        func stripped(_ value: Any?) -> [[String: Any]] {
+            ((value as? [[String: Any]]) ?? []).filter {
+                !((($0["command"] as? String) ?? "").contains("notch-hook"))
+            }
+        }
+
+        for event in ["sessionStart", "beforeSubmitPrompt", "afterFileEdit", "postToolUse", "stop", "sessionEnd"] {
+            hooks[event] = stripped(hooks[event]) + [["command": "\(binary) cursor-event"]]
+        }
+        hooks["beforeShellExecution"] = stripped(hooks["beforeShellExecution"])
+            + [["command": "\(binary) cursor-shell", "timeout": 90]]
+
+        root["version"] = root["version"] ?? 1
+        root["hooks"] = hooks
+        let output = try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
+        try output.write(to: hooksURL)
     }
 }
 

@@ -87,6 +87,36 @@ struct EqualizerBars: View {
 
 // MARK: - Compact state
 
+/// Neutral per-agent badge (glyph + signature color) — no trademarked logos.
+struct AgentBadge: View {
+    let agent: String?
+    var dimmed = false
+
+    var body: some View {
+        let style = Self.style(agent)
+        ZStack {
+            RoundedRectangle(cornerRadius: 5)
+                .fill(style.color.opacity(0.18))
+            Text(style.glyph)
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(style.color)
+        }
+        .frame(width: 20, height: 20)
+        .opacity(dimmed ? 0.5 : 1)
+    }
+
+    static func style(_ agent: String?) -> (glyph: String, color: Color) {
+        switch agent {
+        case "claude-code", "claude":
+            return ("✳", Color(red: 0.85, green: 0.47, blue: 0.34))
+        case "cursor":
+            return ("▮", Color(white: 0.92))
+        default:
+            return ("👾", .purple)
+        }
+    }
+}
+
 struct CompactLeadingView: View {
     @ObservedObject var model: AppModel
 
@@ -375,8 +405,7 @@ struct PermissionCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Text("👾")
-                    .font(.system(size: 13))
+                AgentBadge(agent: request.agent)
                 Text(request.projectName)
                     .font(.callout.weight(.semibold))
                 Text("· \(request.machine)")
@@ -516,17 +545,15 @@ struct SessionRow: View {
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
             ZStack {
-                Text("👾")
-                    .font(.system(size: 13))
-                    .opacity(session.state == .working ? 1 : 0.4)
+                AgentBadge(agent: session.agent, dimmed: session.state != .working)
                 if session.state != .working {
                     Image(systemName: session.state.icon)
                         .font(.system(size: 8, weight: .bold))
                         .foregroundStyle(session.state.color)
-                        .offset(x: 7, y: 6)
+                        .offset(x: 8, y: 8)
                 }
             }
-            .frame(width: 20)
+            .frame(width: 22)
 
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 5) {

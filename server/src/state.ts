@@ -31,6 +31,7 @@ export interface PermissionRequest {
   id: string
   machine: string
   sessionId: string
+  agent?: string
   toolName: string
   toolInput: unknown
   cwd?: string
@@ -197,6 +198,7 @@ export class Store {
       id: randomUUID(),
       machine: env.machine,
       sessionId: env.event.session_id,
+      agent: env.agent ?? 'claude-code',
       toolName: env.event.tool_name,
       toolInput: env.event.tool_input,
       cwd: env.event.cwd,
