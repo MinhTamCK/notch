@@ -1,6 +1,5 @@
 import AppKit
 import DynamicNotchKit
-import ServiceManagement
 import SwiftUI
 
 @main
@@ -8,49 +7,8 @@ struct NotchApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
 
     var body: some Scene {
-        MenuBarExtra("Notch", systemImage: "rectangle.topthird.inset.filled") {
-            MenuContent(model: delegate.model)
-        }
-    }
-}
-
-struct MenuContent: View {
-    @ObservedObject var model: AppModel
-    @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
-
-    var body: some View {
-        Text("\(model.mode == .hosting ? "●" : model.connection.rawValue) \(model.serverDescription)")
-        Text("\(model.workingCount) working · \(model.attentionCount) need you")
-        Divider()
-        Button("Show sessions") { model.requestExpand?() }
-        if model.mode == .hosting {
-            Button(LocalSetup.isInstalled ? "Reinstall Claude Code Hooks (this Mac)" : "Enable Claude Code on This Mac") {
-                try? LocalSetup.install()
-            }
-            Button("Add Remote Machine (Copy Command)") {
-                RemoteAdd.copyToClipboard(token: model.token, port: model.hostedPort)
-            }
-        } else {
-            Button("Reconnect") { model.start() }
-        }
-        Toggle("Sound Alerts", isOn: $model.soundEnabled)
-        // Registration only works from an installed .app bundle, not `swift run`.
-        if Bundle.main.bundlePath.hasSuffix(".app") {
-            Toggle("Launch at Login", isOn: $launchAtLogin)
-                .onChange(of: launchAtLogin) { _, enable in
-                    do {
-                        if enable {
-                            try SMAppService.mainApp.register()
-                        } else {
-                            try SMAppService.mainApp.unregister()
-                        }
-                    } catch {
-                        launchAtLogin = SMAppService.mainApp.status == .enabled
-                    }
-                }
-        }
-        Divider()
-        Button("Quit Notch") { NSApp.terminate(nil) }
+        // Everything lives in the notch panel (gear icon → settings); no menu bar item.
+        Settings { EmptyView() }
     }
 }
 

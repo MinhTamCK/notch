@@ -1,3 +1,5 @@
+import AppKit
+import ServiceManagement
 import SwiftUI
 
 extension SessionState {
@@ -132,6 +134,7 @@ struct CompactTrailingView: View {
 struct ExpandedView: View {
     @ObservedObject var model: AppModel
     @State private var showAll = false
+    @State private var showSettings = false
 
     private var pending: [PermissionRequest] {
         model.pendingPermissions.values.sorted { $0.createdAt < $1.createdAt }
@@ -156,6 +159,9 @@ struct ExpandedView: View {
         VStack(alignment: .leading, spacing: 10) {
             header
 
+            if showSettings {
+                SettingsSection(model: model)
+            } else {
             if !pending.isEmpty {
                 VStack(spacing: 8) {
                     ForEach(pending) { request in
@@ -199,6 +205,7 @@ struct ExpandedView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
                 }
             }
+            }
         }
         .padding(14)
         .frame(width: 400)
@@ -234,10 +241,128 @@ struct ExpandedView: View {
             }
             .buttonStyle(.plain)
             .help(model.soundEnabled ? "Mute alerts" : "Unmute alerts")
+            Button {
+                withAnimation(panelSpring) { showSettings.toggle() }
+            } label: {
+                Image(systemName: showSettings ? "xmark.circle.fill" : "gearshape.fill")
+                    .font(.caption)
+                    .foregroundStyle(showSettings ? Color.white : Color.secondary)
+            }
+            .buttonStyle(.plain)
+            .help(showSettings ? "Back to sessions" : "Settings")
             Circle()
                 .fill(model.connection == .connected ? .green : .red)
                 .frame(width: 6, height: 6)
         }
+    }
+}
+
+// MARK: - Settings (gear icon in the header)
+
+struct SettingsSection: View {
+    @ObservedObject var model: AppModel
+    @State private var hooksInstalled = LocalSetup.isInstalled
+    @State private var copied = false
+    @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            settingRow(
+                title: model.mode == .hosting ? "Server" : "Connection",
+                subtitle: model.serverDescription
+            ) {
+                Text(model.mode == .hosting ? "hosting" : model.connection.rawValue)
+                    .font(.caption2)
+                    .foregroundStyle(model.connection == .connected ? .green : .red)
+            }
+
+            settingRow(
+                title: "Claude Code on this Mac",
+                subtitle: hooksInstalled ? "Hooks installed" : "Sessions on this Mac won't appear yet"
+            ) {
+                Button(hooksInstalled ? "Reinstall" : "Install") {
+                    try? LocalSetup.install()
+                    hooksInstalled = LocalSetup.isInstalled
+                }
+                .buttonStyle(PillButtonStyle(prominent: !hooksInstalled))
+            }
+
+            if model.mode == .hosting {
+                settingRow(
+                    title: "Add remote machine",
+                    subtitle: "Paste the command in the remote shell"
+                ) {
+                    Button(copied ? "Copied ✓" : "Copy command") {
+                        RemoteAdd.copyToClipboard(token: model.token, port: model.hostedPort)
+                        copied = true
+                        Task {
+                            try? await Task.sleep(for: .seconds(2))
+                            copied = false
+                        }
+                    }
+                    .buttonStyle(PillButtonStyle(prominent: true))
+                }
+            } else {
+                settingRow(title: "Reconnect", subtitle: "Re-read ~/.notch/env and retry") {
+                    Button("Reconnect") { model.start() }
+                        .buttonStyle(PillButtonStyle())
+                }
+            }
+
+            if Bundle.main.bundlePath.hasSuffix(".app") {
+                settingRow(title: "Launch at Login", subtitle: nil) {
+                    Toggle("", isOn: $launchAtLogin)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.mini)
+                        .onChange(of: launchAtLogin) { _, enable in
+                            do {
+                                if enable {
+                                    try SMAppService.mainApp.register()
+                                } else {
+                                    try SMAppService.mainApp.unregister()
+                                }
+                            } catch {
+                                launchAtLogin = SMAppService.mainApp.status == .enabled
+                            }
+                        }
+                }
+            }
+
+            HStack {
+                Text("Notch v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev")")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Quit") { NSApp.terminate(nil) }
+                    .buttonStyle(PillButtonStyle(destructive: true))
+            }
+            .padding(.top, 2)
+        }
+    }
+
+    private func settingRow(
+        title: String,
+        subtitle: String?,
+        @ViewBuilder trailing: () -> some View
+    ) -> some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.callout)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer()
+            trailing()
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(RoundedRectangle(cornerRadius: 8).fill(cardBackground))
     }
 }
 
