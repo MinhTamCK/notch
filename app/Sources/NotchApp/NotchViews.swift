@@ -212,7 +212,7 @@ struct ExpandedView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             header
 
             if showSettings {
@@ -235,13 +235,13 @@ struct ExpandedView: View {
                     .padding(.vertical, 14)
             } else {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 6) {
+                    LazyVStack(alignment: .leading, spacing: 4) {
                         ForEach(machines, id: \.name) { machine in
                             Text(machine.name.uppercased())
                                 .font(.system(size: 9, weight: .bold))
                                 .tracking(1.2)
                                 .foregroundStyle(.secondary)
-                                .padding(.top, 2)
+                                .padding(.top, 1)
                             ForEach(machine.sessions) { session in
                                 SessionRow(session: session)
                             }
@@ -249,6 +249,7 @@ struct ExpandedView: View {
                     }
                 }
                 .frame(maxHeight: 320)
+                .scrollIndicators(.never)
 
                 let hidden = model.visibleSessions.count - focusedSessions.count
                 if hidden > 0 {
@@ -263,7 +264,7 @@ struct ExpandedView: View {
             }
             }
         }
-        .padding(14)
+        .padding(12)
         .frame(width: 400)
         .contentShape(Rectangle())
         // Tap anywhere in the panel to collapse; buttons and links still win.
@@ -417,8 +418,8 @@ struct SettingsSection: View {
             trailing()
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .background(RoundedRectangle(cornerRadius: 8).fill(cardBackground))
+        .padding(.vertical, 5)
+        .background(RoundedRectangle(cornerRadius: 7).fill(cardBackground))
     }
 }
 
@@ -480,6 +481,7 @@ struct PermissionCard: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(maxHeight: 170)
+            .scrollIndicators(.never)
             .padding(7)
             .background(RoundedRectangle(cornerRadius: 7).fill(.black.opacity(0.35)))
         } else if let detail = request.detail {
@@ -569,7 +571,7 @@ struct SessionRow: View {
     }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 8) {
+        HStack(alignment: .center, spacing: 7) {
             ZStack {
                 AgentBadge(agent: session.agent, dimmed: session.state != .working)
                 if session.state != .working {
@@ -579,9 +581,9 @@ struct SessionRow: View {
                         .offset(x: 8, y: 8)
                 }
             }
-            .frame(width: 22)
+            .frame(width: 21)
 
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 5) {
                     Text(session.projectName)
                         .font(.system(.callout, design: .rounded).weight(.medium))
@@ -607,7 +609,11 @@ struct SessionRow: View {
             }
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background(RoundedRectangle(cornerRadius: 8).fill(cardBackground))
+        .padding(.vertical, 3)
+        .background(
+            RoundedRectangle(cornerRadius: 7)
+                .fill(cardBackground)
+                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(.white.opacity(0.05), lineWidth: 1))
+        )
     }
 }
