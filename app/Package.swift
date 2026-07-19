@@ -5,7 +5,8 @@ let package = Package(
     name: "NotchApp",
     platforms: [.macOS(.v14)],
     dependencies: [
-        .package(url: "https://github.com/MrKai77/DynamicNotchKit", from: "1.1.0"),
+        // Vendored (MIT) with reduced content margins — see Vendor/DynamicNotchKit/Package.swift
+        .package(path: "Vendor/DynamicNotchKit"),
         .package(url: "https://github.com/swhitty/FlyingFox", from: "0.27.0"),
     ],
     targets: [
