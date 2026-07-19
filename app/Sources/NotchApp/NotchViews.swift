@@ -235,7 +235,7 @@ struct ExpandedView: View {
                     .padding(.vertical, 14)
             } else {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 4) {
+                    LazyVStack(alignment: .leading, spacing: 5) {
                         ForEach(machines, id: \.name) { machine in
                             Text(machine.name.uppercased())
                                 .font(.system(size: 9, weight: .bold))
@@ -583,7 +583,7 @@ struct SessionRow: View {
             }
             .frame(width: 21)
 
-            VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 5) {
                     Text(session.projectName)
                         .font(.system(.callout, design: .rounded).weight(.medium))
@@ -608,8 +608,8 @@ struct SessionRow: View {
                 }
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 3)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 4)
         .background(
             RoundedRectangle(cornerRadius: 7)
                 .fill(cardBackground)
