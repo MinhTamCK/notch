@@ -233,7 +233,14 @@ export class Store {
         break
       }
       case 'Stop':
-        s.state = 'done'
+        // "Your turn" ping: when opted in, a finished turn alerts right away
+        // (matching Vibe Island's "agent finishes → notch pops").
+        if (this.notifyOnTurnDone && !this.hasPendingPermission(s)) {
+          s.state = 'needs_attention'
+          s.lastMessage = 'Finished — your turn'
+        } else {
+          s.state = 'done'
+        }
         break
       case 'SessionEnd':
         s.state = 'ended'

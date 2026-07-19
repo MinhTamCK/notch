@@ -479,7 +479,14 @@ final class AppModel: ObservableObject {
             }
             s.lastMessage = trunc(msg, 300)
         case "Stop":
-            s.state = .done
+            // "Your turn" ping: when opted in, a finished turn is an alert (expand +
+            // sound) right away — matching Vibe Island's "agent finishes → notch pops".
+            if notifyOnTurnDone, !hasPendingPermission(key) {
+                s.state = .needsAttention
+                s.lastMessage = "Finished — your turn"
+            } else {
+                s.state = .done
+            }
         case "SessionEnd":
             s.state = .ended
         default:
