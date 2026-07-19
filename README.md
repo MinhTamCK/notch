@@ -84,3 +84,7 @@ scripts/release.sh         # runs tests, builds universal, publishes
 ```
 
 The app embeds the server, so `Notch.app` alone is enough to run everything. The `server/` (Node/TypeScript) directory is an optional headless deployment; the app auto-detects it and switches to a viewer.
+
+## License
+
+[MIT](LICENSE) © MinhTamCK
