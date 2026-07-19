@@ -11,13 +11,13 @@ struct SourceFilterTests {
 
     @Test func allowsTailscaleRange() {
         #expect(SourceFilter.isAllowed(ip: "100.64.0.1"))
-        #expect(SourceFilter.isAllowed(ip: "100.82.132.78"))   // the real VM
+        #expect(SourceFilter.isAllowed(ip: "100.100.100.100")) // mid-range tailnet address
         #expect(SourceFilter.isAllowed(ip: "100.127.255.255"))
         #expect(SourceFilter.isAllowed(ip: "fd7a:115c:a1e0::1"))
     }
 
     @Test func rejectsLanAndPublic() {
-        #expect(!SourceFilter.isAllowed(ip: "192.168.1.10"))
+        #expect(!SourceFilter.isAllowed(ip: "192.168.1.100"))
         #expect(!SourceFilter.isAllowed(ip: "10.0.0.5"))
         #expect(!SourceFilter.isAllowed(ip: "8.8.8.8"))
         #expect(!SourceFilter.isAllowed(ip: "100.63.255.255"))  // just below /10

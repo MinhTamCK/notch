@@ -37,9 +37,9 @@ describe('allowedSource', () => {
 
   it('allows the Tailscale range 100.64.0.0/10', () => {
     expect(allowedSource('100.64.0.1')).toBe(true)
-    expect(allowedSource('100.82.132.78')).toBe(true) // the real VM
+    expect(allowedSource('100.100.100.100')).toBe(true) // mid-range tailnet address
     expect(allowedSource('100.127.255.255')).toBe(true)
-    expect(allowedSource('::ffff:100.82.132.78')).toBe(true)
+    expect(allowedSource('::ffff:100.100.100.100')).toBe(true)
   })
 
   it('allows the Tailscale IPv6 ULA prefix', () => {
@@ -48,7 +48,7 @@ describe('allowedSource', () => {
   })
 
   it('rejects LAN and public addresses', () => {
-    expect(allowedSource('192.168.1.10')).toBe(false) // Mac's own LAN IP
+    expect(allowedSource('192.168.1.100')).toBe(false) // a LAN address
     expect(allowedSource('192.168.1.14')).toBe(false)
     expect(allowedSource('10.0.0.5')).toBe(false)
     expect(allowedSource('8.8.8.8')).toBe(false)
