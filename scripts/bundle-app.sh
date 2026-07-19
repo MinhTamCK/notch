@@ -20,6 +20,7 @@ rm -rf "$BUNDLE"
 mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources"
 cp "$BIN" "$BUNDLE/Contents/MacOS/NotchApp"
 cp "$ROOT/app/.build/apple/Products/Release/notch-hook" "$BUNDLE/Contents/Resources/notch-hook"
+cp "$ROOT/app/Assets/"*.png "$BUNDLE/Contents/Resources/"
 cp "$DIST/AppIcon.icns" "$BUNDLE/Contents/Resources/AppIcon.icns"
 
 cat > "$BUNDLE/Contents/Info.plist" <<'EOF'

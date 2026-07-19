@@ -87,22 +87,48 @@ struct EqualizerBars: View {
 
 // MARK: - Compact state
 
-/// Neutral per-agent badge (glyph + signature color) — no trademarked logos.
+/// Per-agent badge: real app icon when bundled, glyph fallback in dev builds.
 struct AgentBadge: View {
     let agent: String?
     var dimmed = false
 
+    private static var cache: [String: NSImage] = [:]
+
     var body: some View {
-        let style = Self.style(agent)
-        ZStack {
-            RoundedRectangle(cornerRadius: 5)
-                .fill(style.color.opacity(0.18))
-            Text(style.glyph)
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(style.color)
+        Group {
+            if let image = Self.image(for: agent) {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
+            } else {
+                let style = Self.style(agent)
+                ZStack {
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(style.color.opacity(0.18))
+                    Text(style.glyph)
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(style.color)
+                }
+            }
         }
         .frame(width: 20, height: 20)
         .opacity(dimmed ? 0.5 : 1)
+    }
+
+    private static func image(for agent: String?) -> NSImage? {
+        let name: String?
+        switch agent {
+        case "claude-code", "claude": name = "agent-claude"
+        case "cursor": name = "agent-cursor"
+        default: name = nil
+        }
+        guard let name else { return nil }
+        if let cached = cache[name] { return cached }
+        guard let url = Bundle.main.url(forResource: name, withExtension: "png"),
+              let image = NSImage(contentsOf: url) else { return nil }
+        cache[name] = image
+        return image
     }
 
     static func style(_ agent: String?) -> (glyph: String, color: Color) {
