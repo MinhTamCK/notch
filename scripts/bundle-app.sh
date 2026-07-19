@@ -7,7 +7,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST="$ROOT/app/dist"
 BUNDLE="$DIST/Notch.app"
 
-(cd "$ROOT/app" && swift build -c release)
+(cd "$ROOT/app" && swift build -c release --arch arm64 --arch x86_64)
+BIN="$ROOT/app/.build/apple/Products/Release/NotchApp"
 mkdir -p "$DIST"
 
 if [ ! -f "$DIST/AppIcon.icns" ]; then
@@ -17,7 +18,7 @@ fi
 
 rm -rf "$BUNDLE"
 mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources"
-cp "$ROOT/app/.build/release/NotchApp" "$BUNDLE/Contents/MacOS/NotchApp"
+cp "$BIN" "$BUNDLE/Contents/MacOS/NotchApp"
 cp "$DIST/AppIcon.icns" "$BUNDLE/Contents/Resources/AppIcon.icns"
 
 cat > "$BUNDLE/Contents/Info.plist" <<'EOF'
