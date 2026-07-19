@@ -178,7 +178,9 @@ final class EmbeddedServer {
             }
             let host = request.headers[HTTPHeader("Host")] ?? "localhost:\(self.port)"
             // Only the machine token reaches the remote — never the operator token.
+            // The hook is inlined so the remote needs no second (token-bearing) fetch.
             let script = EmbeddedScripts.installScript
+                .replacingOccurrences(of: "__HOOK_SCRIPT__", with: EmbeddedScripts.hookScript)
                 .replacingOccurrences(of: "__SERVER__", with: "http://\(host)")
                 .replacingOccurrences(of: "__TOKEN__", with: self.machineToken)
             return HTTPResponse(statusCode: .ok, headers: [HTTPHeader("Content-Type"): "text/plain"],
@@ -315,14 +317,16 @@ enum LocalSetup {
 enum RemoteAdd {
     /// Remote access is Tailscale-only: the server rejects non-tailnet sources,
     /// so a LAN/public address in the command would never work anyway.
-    static func command(token: String, port: UInt16) -> String? {
+    /// The URL carries the operator token (which authorizes minting an installer);
+    /// the returned script provisions the remote with only the machine token.
+    static func command(operatorToken: String, port: UInt16) -> String? {
         guard let address = tailscaleAddress() else { return nil }
-        return "curl -fsSL \"http://\(address):\(port)/install?token=\(token)\" | bash"
+        return "curl -fsSL \"http://\(address):\(port)/install?token=\(operatorToken)\" | bash"
     }
 
     @discardableResult
-    static func copyToClipboard(token: String, port: UInt16) -> Bool {
-        guard let command = command(token: token, port: port) else { return false }
+    static func copyToClipboard(operatorToken: String, port: UInt16) -> Bool {
+        guard let command = command(operatorToken: operatorToken, port: port) else { return false }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(command, forType: .string)

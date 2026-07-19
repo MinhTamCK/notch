@@ -383,7 +383,9 @@ struct SettingsSection: View {
                         subtitle: "Via Tailscale (encrypted) — paste in the remote shell"
                     ) {
                         Button(copied ? "Copied ✓" : "Copy command") {
-                            RemoteAdd.copyToClipboard(token: model.token, port: model.hostedPort)
+                            // /install authenticates with the operator token; the
+                            // returned script provisions the remote with only the machine token.
+                            RemoteAdd.copyToClipboard(operatorToken: model.operatorToken, port: model.hostedPort)
                             copied = true
                             Task {
                                 try? await Task.sleep(for: .seconds(2))

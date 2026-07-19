@@ -84,7 +84,10 @@ enum EmbeddedScripts {
     mkdir -p "$HOME/.notch" "$HOME/.claude"
     chmod 700 "$HOME/.notch"
 
-    curl -fsS "__SERVER__/install/hook?token=__TOKEN__" -o "$HOME/.notch/notch-hook.sh"
+    # The hook is inlined below (quoted heredoc — no expansion, no second fetch).
+    cat > "$HOME/.notch/notch-hook.sh" <<'NOTCH_HOOK_EOF'
+    __HOOK_SCRIPT__
+    NOTCH_HOOK_EOF
     chmod 755 "$HOME/.notch/notch-hook.sh"
 
     if [ ! -f "$HOME/.notch/env" ]; then
