@@ -53,13 +53,9 @@ Because hooks **fail open**, Notch being down never freezes an agent — the wor
 ## Quick start
 
 1. **[Download the latest release](https://github.com/MinhTamCK/notch/releases/latest)**, unzip, and drag `Notch.app` into `/Applications`.
-2. Clear the quarantine flag once (builds aren't notarized yet):
-   ```bash
-   xattr -cr /Applications/Notch.app
-   ```
-3. **Open it.** It hosts its own server and generates its own tokens — nothing to configure.
-4. Click the **⚙️ gear** in the notch panel → **Enable Claude Code on This Mac**. New sessions now show up in your notch.
-5. To watch a VM or another computer: gear → **Add Remote Machine (Copy Command)**, then paste that one line into the remote shell (needs `curl` + `jq`, and Tailscale reach to your Mac).
+2. **Open it.** It hosts its own server and generates its own tokens — nothing to configure.
+3. Click the **⚙️ gear** in the notch panel → **Enable Claude Code on This Mac**. New sessions now show up in your notch.
+4. To watch a VM or another computer: gear → **Add Remote Machine (Copy Command)**, then paste that one line into the remote shell (needs `curl` + `jq`, and Tailscale reach to your Mac).
 
 **Requirements:** macOS 14+ · Apple Silicon or Intel (universal) · [Tailscale](https://tailscale.com/download) for remote machines.
 

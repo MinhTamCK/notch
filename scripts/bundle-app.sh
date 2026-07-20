@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Build a release Notch.app bundle (menu-bar-only, ad-hoc signed) and install it
+# Build a release Notch.app bundle (menu-bar-only) and install it
 # to /Applications (or ~/Applications if not writable).
+# Signs with the Developer ID identity when present in the keychain
+# (override with NOTCH_SIGN_IDENTITY); falls back to ad-hoc.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -43,7 +45,17 @@ cat > "$BUNDLE/Contents/Info.plist" <<'EOF'
 </plist>
 EOF
 
-codesign --force -s - "$BUNDLE"
+IDENTITY="${NOTCH_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Developer ID Application/ {print $2; exit}')}"
+if [ -n "$IDENTITY" ]; then
+  # notarization requires every Mach-O signed with hardened runtime + timestamp,
+  # inner binaries first
+  codesign --force --options runtime --timestamp -s "$IDENTITY" "$BUNDLE/Contents/Resources/notch-hook"
+  codesign --force --options runtime --timestamp -s "$IDENTITY" "$BUNDLE"
+  echo "signed: $IDENTITY"
+else
+  codesign --force -s - "$BUNDLE"
+  echo "signed: ad-hoc (no Developer ID identity in keychain)"
+fi
 
 TARGET="/Applications/Notch.app"
 if [ -w /Applications ]; then
