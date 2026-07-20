@@ -318,14 +318,13 @@ enum RemoteAdd {
     /// so a LAN/public address in the command would never work anyway.
     /// The URL carries the operator token (which authorizes minting an installer);
     /// the returned script provisions the remote with only the machine token.
-    static func command(operatorToken: String, port: UInt16) -> String? {
-        guard let address = tailscaleAddress() else { return nil }
-        return "curl -fsSL \"http://\(address):\(port)/install?token=\(operatorToken)\" | bash"
+    static func command(address: String, operatorToken: String, port: UInt16) -> String {
+        "curl -fsSL \"http://\(address):\(port)/install?token=\(operatorToken)\" | bash"
     }
 
     @discardableResult
-    static func copyToClipboard(operatorToken: String, port: UInt16) -> Bool {
-        guard let command = command(operatorToken: operatorToken, port: port) else { return false }
+    static func copyToClipboard(address: String, operatorToken: String, port: UInt16) -> Bool {
+        let command = command(address: address, operatorToken: operatorToken, port: port)
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(command, forType: .string)

@@ -281,7 +281,8 @@ struct ExpandedView: View {
         .frame(width: 400)
         .contentShape(Rectangle())
         // Tap anywhere in the panel to collapse; buttons and links still win.
-        .onTapGesture { model.requestCompact?() }
+        // In settings, stray clicks shouldn't close the panel — exit via the ✕.
+        .onTapGesture { if !showSettings { model.requestCompact?() } }
         .animation(panelSpring, value: model.pendingPermissions)
         .animation(panelSpring, value: model.sessions)
         .onChange(of: pending.isEmpty) { _, isEmpty in
@@ -308,6 +309,8 @@ struct ExpandedView: View {
                 Image(systemName: model.soundEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
                     .font(.caption)
                     .foregroundStyle(model.soundEnabled ? Color.secondary : Color.orange)
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help(model.soundEnabled ? "Mute alerts" : "Unmute alerts")
@@ -322,6 +325,8 @@ struct ExpandedView: View {
                             Circle().fill(.orange).frame(width: 5, height: 5).offset(x: 2, y: -2)
                         }
                     }
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help(showSettings ? "Back to sessions" : "Settings")
@@ -339,7 +344,7 @@ struct SettingsSection: View {
     @State private var hooksInstalled = LocalSetup.isInstalled
     @State private var copied = false
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
-    @State private var tailscaleUp = false
+    @State private var tailscaleAddress: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -377,7 +382,7 @@ struct SettingsSection: View {
             }
 
             if model.mode == .hosting {
-                if tailscaleUp {
+                if let tailscaleAddress {
                     settingRow(
                         title: "Add remote machine",
                         subtitle: "Via Tailscale (encrypted) — paste in the remote shell"
@@ -385,7 +390,7 @@ struct SettingsSection: View {
                         Button(copied ? "Copied ✓" : "Copy command") {
                             // /install authenticates with the operator token; the
                             // returned script provisions the remote with only the machine token.
-                            RemoteAdd.copyToClipboard(operatorToken: model.operatorToken, port: model.hostedPort)
+                            RemoteAdd.copyToClipboard(address: tailscaleAddress, operatorToken: model.operatorToken, port: model.hostedPort)
                             copied = true
                             Task {
                                 try? await Task.sleep(for: .seconds(2))
@@ -452,9 +457,10 @@ struct SettingsSection: View {
             }
             .padding(.top, 2)
         }
-        .onAppear {
-            model.checkForUpdates()
-            tailscaleUp = RemoteAdd.tailscaleAddress() != nil
+        .onAppear { model.checkForUpdates() }
+        // `tailscale ip` shells out and can block for seconds; keep it off the main thread.
+        .task {
+            tailscaleAddress = await Task.detached { RemoteAdd.tailscaleAddress() }.value
         }
     }
 

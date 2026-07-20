@@ -90,12 +90,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             return nil
         }
         // Expanded: a click on the black notch strip along the top collapses.
+        // The strip is the notch (or menu bar on notchless screens) — the panel
+        // content starts right below it, so a fixed 44pt band would swallow
+        // clicks on the header row (gear/speaker) on notchless displays.
         let screenPoint = panel.convertPoint(toScreen: event.locationInWindow)
-        if let screen = panel.screen ?? NSScreen.screens.first,
-           screen.frame.maxY - screenPoint.y <= 44 {
-            autoExpanded = false
-            setNotch(expanded: false)
-            return nil
+        if let screen = panel.screen ?? NSScreen.screens.first {
+            let stripHeight = screen.safeAreaInsets.top > 0
+                ? screen.safeAreaInsets.top
+                : screen.frame.maxY - screen.visibleFrame.maxY
+            if screen.frame.maxY - screenPoint.y <= stripHeight {
+                autoExpanded = false
+                setNotch(expanded: false)
+                return nil
+            }
         }
         return event
     }

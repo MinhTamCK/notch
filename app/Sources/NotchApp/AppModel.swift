@@ -324,8 +324,10 @@ final class AppModel: ObservableObject {
 
         switch message.type {
         case "snapshot":
-            sessions = Dictionary(uniqueKeysWithValues: (message.sessions ?? []).map { ($0.key, $0) })
-            pendingPermissions = Dictionary(uniqueKeysWithValues: (message.permissions ?? []).map { ($0.id, $0) })
+            // A buggy or foreign server may repeat keys in a snapshot; last one
+            // wins — Dictionary(uniqueKeysWithValues:) would crash on duplicates.
+            sessions = Dictionary((message.sessions ?? []).map { ($0.key, $0) }, uniquingKeysWith: { _, new in new })
+            pendingPermissions = Dictionary((message.permissions ?? []).map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
             // Alert (not just expand) so attention that arrived while disconnected isn't silent.
             if attentionCount > 0 {
                 alert()
