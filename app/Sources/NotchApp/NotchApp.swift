@@ -60,6 +60,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
                 self.compactDebounce?.cancel()
                 self.autoExpanded = true
                 self.setNotch(expanded: true)
+                // Only a pending confirm (Approve/Deny buttons) holds the panel
+                // open; other alerts pop out for a glance, then tuck away.
+                if !self.model.hasPendingConfirm {
+                    self.compactDebounce = Task { [weak self] in
+                        try? await Task.sleep(for: .seconds(3))
+                        guard !Task.isCancelled, let self, self.autoExpanded,
+                              !self.model.hasPendingConfirm else { return }
+                        self.autoExpanded = false
+                        self.setNotch(expanded: false)
+                    }
+                }
             } else if self.autoExpanded {
                 // Debounce auto-collapse so back-to-back approvals don't flicker the panel.
                 self.compactDebounce?.cancel()

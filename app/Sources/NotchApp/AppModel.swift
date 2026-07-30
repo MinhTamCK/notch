@@ -61,6 +61,12 @@ final class AppModel: ObservableObject {
 
     var workingCount: Int { sessions.values.filter { $0.state == .working }.count }
     var attentionCount: Int { sessions.values.filter { $0.state.needsUser }.count }
+    /// True while an approve/deny confirm is on screen. Checks both maps because
+    /// in client mode the session update and the permission payload arrive as
+    /// separate messages, in either order.
+    var hasPendingConfirm: Bool {
+        !pendingPermissions.isEmpty || sessions.values.contains { $0.state == .needsPermission }
+    }
 
     // MARK: Config
 
@@ -538,7 +544,13 @@ final class AppModel: ObservableObject {
             s.state = decision == "timeout" ? .needsAttention : .working
             s.updatedAt = Date().timeIntervalSince1970 * 1000
             sessions[key] = s
-            if attentionCount == 0 { onAttention?(false) }
+            if attentionCount == 0 {
+                onAttention?(false)
+            } else if decision == "timeout", !hasPendingConfirm {
+                // The confirm became a plain alert — re-notify (silently) so the
+                // panel drops from "hold open" to the short glance timer.
+                onAttention?(true)
+            }
         }
 
         for waiter in permissionWaiters.removeValue(forKey: id) ?? [] {
