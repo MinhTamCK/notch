@@ -95,41 +95,55 @@ let envelope: [String: Any] = [
     "event": event,
 ]
 
-func gate() -> (decision: String, reason: String)? {
+func gate() -> (decision: String, reason: String, answers: [String: Any]?)? {
     guard let created = request("POST", "/api/permissions", body: envelope, timeout: 3),
           let id = created["id"] as? String,
           let decided = request("GET", "/api/permissions/\(id)/decision?wait=55", body: nil, timeout: 58),
           let decision = decided["decision"] as? String,
           decision == "allow" || decision == "deny"
     else { return nil }
-    return (decision, decided["reason"] as? String ?? "Decided via Notch")
+    return (decision, decided["reason"] as? String ?? "Decided via Notch", decided["answers"] as? [String: Any])
 }
 
 switch mode {
 case "permission":
     // Respect Claude Code's permission mode: only gate tools it would prompt for.
+    // AskUserQuestion prompts in every mode, so it's always gated.
     let pm = raw["permission_mode"] as? String ?? "default"
     let tool = raw["tool_name"] as? String ?? ""
-    let skip = ["bypassPermissions", "auto", "dontAsk"].contains(pm)
+    let skip = remoteApprove == "0"
+        || (tool != "AskUserQuestion" && ["bypassPermissions", "auto", "dontAsk"].contains(pm))
         || (pm == "acceptEdits" && ["Edit", "Write", "MultiEdit"].contains(tool))
-        || remoteApprove == "0"
     if skip {
         _ = request("POST", "/api/events", body: envelope, timeout: 2)
         exit(0)
     }
-    guard let (decision, reason) = gate() else { exit(0) } // silent → terminal prompt
-    emit(["hookSpecificOutput": [
-        "hookEventName": "PreToolUse",
-        "permissionDecision": decision,
-        "permissionDecisionReason": reason,
-    ]])
+    guard let (decision, reason, answers) = gate() else { exit(0) } // silent → terminal prompt
+    if tool == "AskUserQuestion", decision == "allow" {
+        // Answering means allow + updatedInput carrying the selections; an allow
+        // without answers would run the tool unanswered — fall back to the terminal picker.
+        guard let answers, !answers.isEmpty else { exit(0) }
+        var input = raw["tool_input"] as? [String: Any] ?? [:]
+        input["answers"] = answers
+        emit(["hookSpecificOutput": [
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "updatedInput": input,
+        ]])
+    } else {
+        emit(["hookSpecificOutput": [
+            "hookEventName": "PreToolUse",
+            "permissionDecision": decision,
+            "permissionDecisionReason": reason,
+        ]])
+    }
 
 case "cursor-shell":
     if remoteApprove == "0" {
         _ = request("POST", "/api/events", body: envelope, timeout: 2)
         exit(0) // no output: don't interfere with Cursor's own flow
     }
-    if let (decision, reason) = gate() {
+    if let (decision, reason, _) = gate() {
         if decision == "allow" {
             emit(["permission": "allow"])
         } else {

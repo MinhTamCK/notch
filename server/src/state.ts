@@ -38,6 +38,8 @@ export interface PermissionRequest {
   createdAt: number
   decision?: Decision
   reason?: string
+  /** AskUserQuestion only: question text → selected label(s), comma-joined. */
+  answers?: Record<string, string>
   decidedAt?: number
 }
 
@@ -270,20 +272,24 @@ export class Store {
     this.permissions.set(req.id, req)
     s.state = 'needs_permission'
     s.pendingPermissionIds.push(req.id)
-    s.lastTool = describeTool(req.toolName, env.event.tool_input)
+    s.lastTool =
+      req.toolName === 'AskUserQuestion'
+        ? (describeQuestion(env.event.tool_input) ?? 'Claude is asking you a question')
+        : describeTool(req.toolName, env.event.tool_input)
     s.updatedAt = Date.now()
     this.emit({ type: 'permission', request: req })
     this.emit({ type: 'session', session: s })
     return req
   }
 
-  decide(id: string, decision: Decision, reason?: string): PermissionRequest | undefined {
+  decide(id: string, decision: Decision, reason?: string, answers?: Record<string, string>): PermissionRequest | undefined {
     const req = this.permissions.get(id)
     if (!req || req.decision) return undefined
     req.decision = decision
     req.reason = reason
+    req.answers = answers
     req.decidedAt = Date.now()
-    this.log('permission_decision', { id, decision, reason })
+    this.log('permission_decision', { id, decision, reason, answers })
 
     const s = this.sessions.get(`${req.machine}:${req.sessionId}`)
     if (s && s.pendingPermissionIds.includes(id)) {

@@ -18,7 +18,9 @@ final class EmbeddedServer {
         self.machineToken = machineToken
         self.operatorToken = operatorToken
         self.port = port
-        self.server = HTTPServer(port: port)
+        // FlyingFox kills handlers after 15s by default — the permission
+        // long-poll legitimately holds a request open for up to 120s.
+        self.server = HTTPServer(port: port, timeout: 130)
     }
 
     func start() async throws {
@@ -139,10 +141,12 @@ final class EmbeddedServer {
             guard self.machineOK(request) else { return self.unauthorized }
             guard let id = request.routeParameters["id"] else { return self.json(["error": "bad id"], status: .badRequest) }
             let wait = min(Int(request.routeParameters["wait"] ?? "0") ?? 0, 120)
-            guard let (decision, reason) = await model.waitForDecision(id, waitSeconds: wait) else {
+            guard let decided = await model.waitForDecision(id, waitSeconds: wait) else {
                 return self.json(["error": "unknown permission id"], status: .notFound)
             }
-            return self.json(["decision": decision, "reason": reason ?? ""])
+            var payload: [String: Any] = ["decision": decided.decision, "reason": decided.reason ?? ""]
+            if let answers = decided.answers { payload["answers"] = answers }
+            return self.json(payload)
         }
 
         await server.appendRoute("POST /api/permissions/:id/decide") { [weak self] request in
@@ -152,10 +156,12 @@ final class EmbeddedServer {
                   let body = try? await request.bodyData,
                   let parsed = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any],
                   let decision = parsed["decision"] as? String,
-                  decision == "allow" || decision == "deny"
-            else { return self.json(["error": #"decision must be "allow" or "deny""#], status: .badRequest) }
+                  ["allow", "deny", "timeout"].contains(decision)
+            else { return self.json(["error": #"decision must be "allow", "deny" or "timeout""#], status: .badRequest) }
+            let answers = (parsed["answers"] as? [String: Any])?.compactMapValues { $0 as? String }
             let ok = await MainActor.run {
-                model.localDecide(id, decision: decision, reason: parsed["reason"] as? String)
+                model.localDecide(id, decision: decision, reason: parsed["reason"] as? String,
+                                  answers: (answers?.isEmpty ?? true) ? nil : answers)
             }
             return ok ? self.json(["ok": true]) : self.json(["error": "unknown or already-decided id"], status: .conflict)
         }
@@ -255,10 +261,10 @@ enum LocalSetup {
         for event in eventHooks {
             hooks[event] = stripped(hooks[event]) + [entry(mode: "event")]
         }
+        // AskUserQuestion is gated too: the hook answers it via allow + updatedInput
+        // (Claude Code ≥ 2.1.133), so options can be picked right on the notch.
         hooks["PreToolUse"] = stripped(hooks["PreToolUse"])
-            + [entry(mode: "permission", matcher: "Bash|Write|Edit|MultiEdit|ExitPlanMode", timeout: 60)]
-            // AskUserQuestion isn't a permission (no allow/deny) — report it non-blocking so the notch alerts.
-            + [entry(mode: "event", matcher: "AskUserQuestion")]
+            + [entry(mode: "permission", matcher: "Bash|Write|Edit|MultiEdit|ExitPlanMode|AskUserQuestion", timeout: 60)]
         settings["hooks"] = hooks
 
         let output = try JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys])

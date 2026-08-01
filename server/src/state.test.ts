@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { redact, describeQuestion } from './state.js'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { Store, redact, describeQuestion } from './state.js'
 
 describe('describeQuestion', () => {
   it('summarizes the question with its option labels', () => {
@@ -17,6 +20,28 @@ describe('describeQuestion', () => {
   it('returns undefined when there are no questions', () => {
     expect(describeQuestion({})).toBeUndefined()
     expect(describeQuestion(undefined)).toBeUndefined()
+  })
+})
+
+describe('AskUserQuestion permissions', () => {
+  it('hands the answers to the long-polling hook and summarizes the question', async () => {
+    const store = new Store(mkdtempSync(path.join(tmpdir(), 'notch-test-')))
+    const req = store.createPermission({
+      machine: 'vm',
+      event: {
+        session_id: 's1',
+        hook_event_name: 'PreToolUse',
+        tool_name: 'AskUserQuestion',
+        tool_input: { questions: [{ question: 'Which?', options: [{ label: 'A' }, { label: 'B' }] }] },
+      },
+    })!
+    expect(store.sessions.get('vm:s1')?.lastTool).toBe('Which? · A / B')
+
+    const pending = store.waitForDecision(req.id, 5000)!
+    store.decide(req.id, 'allow', 'Answered via Notch app', { 'Which?': 'A' })
+    const decided = await pending
+    expect(decided.decision).toBe('allow')
+    expect(decided.answers).toEqual({ 'Which?': 'A' })
   })
 })
 

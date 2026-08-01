@@ -67,6 +67,11 @@ enum JSONValue: Codable, Equatable {
         return nil
     }
 
+    var boolValue: Bool? {
+        if case .bool(let value) = self { return value }
+        return nil
+    }
+
     var arrayValue: [JSONValue]? {
         if case .array(let value) = self { return value }
         return nil
@@ -94,6 +99,7 @@ struct PermissionRequest: Codable, Identifiable, Equatable {
     }
 
     var isPlan: Bool { toolName == "ExitPlanMode" }
+    var isQuestion: Bool { toolName == "AskUserQuestion" }
 
     /// The main thing to show the user: the command, file path, or plan text.
     var detail: String? {
@@ -121,6 +127,37 @@ struct PermissionRequest: Codable, Identifiable, Equatable {
         guard toolName == "Write" else { return nil }
         return toolInput?["content"]?.stringValue?.components(separatedBy: "\n")
     }
+
+    /// Parsed AskUserQuestion payload, so the card can render a real picker.
+    var questions: [QuestionItem] {
+        guard isQuestion else { return [] }
+        return (toolInput?["questions"]?.arrayValue ?? []).compactMap { q in
+            guard let text = q["question"]?.stringValue ?? q["header"]?.stringValue else { return nil }
+            let options = (q["options"]?.arrayValue ?? []).compactMap { option -> QuestionOption? in
+                guard let label = option["label"]?.stringValue else { return nil }
+                return QuestionOption(label: label, description: option["description"]?.stringValue)
+            }
+            guard !options.isEmpty else { return nil }
+            return QuestionItem(
+                question: text,
+                header: q["header"]?.stringValue,
+                multiSelect: q["multiSelect"]?.boolValue ?? false,
+                options: options
+            )
+        }
+    }
+}
+
+struct QuestionOption: Equatable {
+    let label: String
+    let description: String?
+}
+
+struct QuestionItem: Equatable {
+    let question: String
+    let header: String?
+    let multiSelect: Bool
+    let options: [QuestionOption]
 }
 
 /// What hooks POST to the server (both bash and compiled variants).

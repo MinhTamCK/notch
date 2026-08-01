@@ -71,7 +71,7 @@ app.get('/api/permissions/:id/decision', requireRole('machine'), async c => {
   const pending = store.waitForDecision(c.req.param('id'), waitSec * 1000)
   if (!pending) return c.json({ error: 'unknown permission id' }, 404)
   const req = await pending
-  return c.json({ decision: req.decision, reason: req.reason })
+  return c.json({ decision: req.decision, reason: req.reason, answers: req.answers })
 })
 
 // Operator-only: viewing all sessions and deciding requests is a dashboard right,
@@ -83,12 +83,26 @@ app.get('/api/permissions', requireRole('operator'), c => {
   return c.json({ permissions: pending })
 })
 
-app.post('/api/permissions/:id/decide', requireRole('operator'), async c => {
-  const body = await c.req.json<{ decision: Decision; reason?: string }>()
-  if (body.decision !== 'allow' && body.decision !== 'deny') {
-    return c.json({ error: 'decision must be "allow" or "deny"' }, 400)
+/** Untrusted transport value → a clean question→label(s) map, or undefined. */
+function cleanAnswers(raw: unknown): Record<string, string> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v === 'string') out[k] = v
   }
-  const req = store.decide(c.req.param('id'), body.decision, body.reason)
+  return Object.keys(out).length ? out : undefined
+}
+
+// "timeout" is a valid operator decision too: it hands the question/tool back
+// to the terminal prompt instead of allowing or denying it.
+const DECISIONS: Decision[] = ['allow', 'deny', 'timeout']
+
+app.post('/api/permissions/:id/decide', requireRole('operator'), async c => {
+  const body = await c.req.json<{ decision: Decision; reason?: string; answers?: unknown }>()
+  if (!DECISIONS.includes(body.decision)) {
+    return c.json({ error: 'decision must be "allow", "deny" or "timeout"' }, 400)
+  }
+  const req = store.decide(c.req.param('id'), body.decision, body.reason, cleanAnswers(body.answers))
   if (!req) return c.json({ error: 'unknown or already-decided permission id' }, 409)
   return c.json({ ok: true })
 })
@@ -116,8 +130,8 @@ wss.on('connection', ws => {
   ws.on('message', data => {
     try {
       const msg = JSON.parse(data.toString())
-      if (msg.type === 'decide' && (msg.decision === 'allow' || msg.decision === 'deny')) {
-        store.decide(msg.id, msg.decision, msg.reason)
+      if (msg.type === 'decide' && DECISIONS.includes(msg.decision)) {
+        store.decide(msg.id, msg.decision, msg.reason, cleanAnswers(msg.answers))
       }
     } catch {
       // ignore malformed client messages

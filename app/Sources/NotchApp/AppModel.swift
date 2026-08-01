@@ -37,8 +37,16 @@ final class AppModel: ObservableObject {
     private let permissionExpiryMs: Double = 90 * 1000
     // Hosting-mode bookkeeping (not part of the Session payload)
     private var sessionPendingIds: [String: [String]] = [:]
-    private var decidedPermissions: [String: (decision: String, reason: String?, at: Double)] = [:]
-    private var permissionWaiters: [String: [CheckedContinuation<(String, String?)?, Never>]] = [:]
+    private var decidedPermissions: [String: (decision: String, reason: String?, answers: [String: String]?, at: Double)] = [:]
+    private var permissionWaiters: [String: [CheckedContinuation<Decision?, Never>]] = [:]
+
+    /// A resolved permission as the long-polling hook sees it. `answers` is only
+    /// set for AskUserQuestion (question text → selected label(s)).
+    struct Decision {
+        let decision: String
+        let reason: String?
+        let answers: [String: String]?
+    }
 
     /// Wired by AppDelegate to control the notch panel.
     var requestExpand: (() -> Void)?
@@ -370,18 +378,20 @@ final class AppModel: ObservableObject {
 
     // MARK: Decisions
 
-    func decide(_ id: String, decision: String) {
+    func decide(_ id: String, decision: String, answers: [String: String]? = nil) {
+        let reason = answers == nil ? "Decided via Notch app" : "Answered via Notch app"
         if mode == .hosting {
-            _ = localDecide(id, decision: decision, reason: "Decided via Notch app")
+            _ = localDecide(id, decision: decision, reason: reason, answers: answers)
         } else {
             // Client mode: optimistic removal; the server's broadcast confirms it.
             pendingPermissions.removeValue(forKey: id)
-            let payload: [String: String] = [
+            var payload: [String: Any] = [
                 "type": "decide",
                 "id": id,
                 "decision": decision,
-                "reason": "Decided via Notch app",
+                "reason": reason,
             ]
+            if let answers { payload["answers"] = answers }
             if let data = try? JSONSerialization.data(withJSONObject: payload),
                let text = String(data: data, encoding: .utf8) {
                 task?.send(.string(text)) { _ in }
@@ -525,7 +535,9 @@ final class AppModel: ObservableObject {
         pendingPermissions[request.id] = request
         sessionPendingIds[key, default: []].append(request.id)
         s.state = .needsPermission
-        s.lastTool = describeTool(toolName, env.event.tool_input)
+        s.lastTool = toolName == "AskUserQuestion"
+            ? (describeQuestion(env.event.tool_input) ?? "Claude is asking you a question")
+            : describeTool(toolName, env.event.tool_input)
         s.updatedAt = Date().timeIntervalSince1970 * 1000
         sessions[key] = s
         sessionStateChanged(from: previous, to: s.state)
@@ -533,9 +545,9 @@ final class AppModel: ObservableObject {
     }
 
     @discardableResult
-    func localDecide(_ id: String, decision: String, reason: String?) -> Bool {
+    func localDecide(_ id: String, decision: String, reason: String?, answers: [String: String]? = nil) -> Bool {
         guard let request = pendingPermissions.removeValue(forKey: id) else { return false }
-        decidedPermissions[id] = (decision, reason, Date().timeIntervalSince1970 * 1000)
+        decidedPermissions[id] = (decision, reason, answers, Date().timeIntervalSince1970 * 1000)
 
         let key = "\(request.machine):\(request.sessionId)"
         sessionPendingIds[key]?.removeAll { $0 == id }
@@ -554,14 +566,16 @@ final class AppModel: ObservableObject {
         }
 
         for waiter in permissionWaiters.removeValue(forKey: id) ?? [] {
-            waiter.resume(returning: (decision, reason))
+            waiter.resume(returning: Decision(decision: decision, reason: reason, answers: answers))
         }
         return true
     }
 
     /// Long-poll support for hooks. Returns nil for unknown ids.
-    func waitForDecision(_ id: String, waitSeconds: Int) async -> (String, String?)? {
-        if let done = decidedPermissions[id] { return (done.decision, done.reason) }
+    func waitForDecision(_ id: String, waitSeconds: Int) async -> Decision? {
+        if let done = decidedPermissions[id] {
+            return Decision(decision: done.decision, reason: done.reason, answers: done.answers)
+        }
         guard pendingPermissions[id] != nil else { return nil }
         return await withCheckedContinuation { continuation in
             permissionWaiters[id, default: []].append(continuation)

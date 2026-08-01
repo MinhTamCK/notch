@@ -234,8 +234,14 @@ struct ExpandedView: View {
             if !pending.isEmpty {
                 VStack(spacing: 8) {
                     ForEach(pending) { request in
-                        PermissionCard(request: request, model: model)
-                            .transition(.scale(scale: 0.95).combined(with: .opacity))
+                        Group {
+                            if request.isQuestion {
+                                QuestionCard(request: request, model: model)
+                            } else {
+                                PermissionCard(request: request, model: model)
+                            }
+                        }
+                        .transition(.scale(scale: 0.95).combined(with: .opacity))
                     }
                 }
             }
@@ -565,6 +571,156 @@ struct PermissionCard: View {
             markdown: markdown,
             options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         )) ?? AttributedString(markdown)
+    }
+}
+
+// MARK: - Question card (AskUserQuestion)
+
+/// Claude asked one or more multiple-choice questions — pick the options here
+/// and submit; the hook answers the tool via allow + updatedInput.
+struct QuestionCard: View {
+    let request: PermissionRequest
+    @ObservedObject var model: AppModel
+    /// question text → selected option labels
+    @State private var selections: [String: Set<String>] = [:]
+
+    private var questions: [QuestionItem] { request.questions }
+    private var answeredCount: Int {
+        questions.filter { !(selections[$0.question] ?? []).isEmpty }.count
+    }
+    private var allAnswered: Bool {
+        !questions.isEmpty && answeredCount == questions.count
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                AgentBadge(agent: request.agent)
+                Text(request.projectName)
+                    .font(.callout.weight(.semibold))
+                Text("· \(request.machine)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Label("Question", systemImage: "questionmark.bubble.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.yellow)
+            }
+
+            if questions.isEmpty {
+                // Unparseable payload (e.g. free-text only) — answer it in the terminal.
+                Text("Claude is asking a question that needs the terminal.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(Array(questions.enumerated()), id: \.element.question) { index, question in
+                            questionBlock(question, number: questions.count > 1 ? index + 1 : nil)
+                        }
+                    }
+                }
+                .frame(maxHeight: 300)
+                // No scrollbar (ugly in the notch) — the question numbers and the
+                // "Submit 1/2" counter already signal there's more below the fold.
+                .scrollIndicators(.never)
+            }
+
+            HStack {
+                // "Timeout" hands the question back to the terminal picker.
+                Button("In Terminal") { model.decide(request.id, decision: "timeout") }
+                    .buttonStyle(PillButtonStyle())
+                Spacer()
+                if !questions.isEmpty {
+                    // The count doubles as a "scroll down, there's more" hint.
+                    Button(allAnswered ? "Submit" : "Submit \(answeredCount)/\(questions.count)") { submit() }
+                        .buttonStyle(PillButtonStyle(prominent: true))
+                        .disabled(!allAnswered)
+                        .opacity(allAnswered ? 1 : 0.45)
+                }
+            }
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(cardBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .strokeBorder(Color.yellow.opacity(0.35), lineWidth: 1)
+                )
+        )
+    }
+
+    private func questionBlock(_ question: QuestionItem, number: Int?) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(number.map { "\($0). \(question.question)" } ?? question.question)
+                .font(.caption.weight(.semibold))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if question.multiSelect {
+                Text("choose all that apply")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(question.options, id: \.label) { option in
+                optionRow(question, option)
+            }
+        }
+    }
+
+    private func optionRow(_ question: QuestionItem, _ option: QuestionOption) -> some View {
+        let selected = (selections[question.question] ?? []).contains(option.label)
+        return Button {
+            var set = selections[question.question] ?? []
+            if question.multiSelect {
+                if selected { set.remove(option.label) } else { set.insert(option.label) }
+            } else {
+                set = selected ? [] : [option.label]
+            }
+            selections[question.question] = set
+        } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: question.multiSelect
+                    ? (selected ? "checkmark.square.fill" : "square")
+                    : (selected ? "smallcircle.filled.circle.fill" : "circle"))
+                    .font(.system(size: 11))
+                    .foregroundStyle(selected ? Color.yellow : Color.secondary)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(option.label)
+                        .font(.caption.weight(selected ? .semibold : .regular))
+                    if let description = option.description {
+                        Text(description)
+                            .font(.system(size: 9.5))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(selected ? Color.white.opacity(0.14) : Color.black.opacity(0.25))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(selected ? Color.yellow.opacity(0.45) : Color.clear, lineWidth: 1)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func submit() {
+        var answers: [String: String] = [:]
+        for question in questions {
+            let picked = selections[question.question] ?? []
+            // Keep the option order stable (a set would shuffle multi-selects).
+            answers[question.question] = question.options
+                .map(\.label).filter(picked.contains).joined(separator: ", ")
+        }
+        model.decide(request.id, decision: "allow", answers: answers)
     }
 }
 

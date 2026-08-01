@@ -34,12 +34,13 @@ enum EmbeddedScripts {
 
     # Respect the session's permission mode: only gate tools Claude Code itself would
     # prompt for. Bypass/auto/dontAsk sessions are monitor-only; acceptEdits skips
-    # the gate for edit tools but still gates Bash and plans.
+    # the gate for edit tools but still gates Bash and plans. AskUserQuestion
+    # prompts in every mode, so it's always gated.
     if [ "$MODE" = "permission" ]; then
       pm="$(jq -r '.permission_mode // "default"' <<<"$payload" 2>/dev/null)"
       tool="$(jq -r '.tool_name // ""' <<<"$payload" 2>/dev/null)"
       case "$pm" in
-        bypassPermissions|auto|dontAsk) MODE="event" ;;
+        bypassPermissions|auto|dontAsk) [ "$tool" = "AskUserQuestion" ] || MODE="event" ;;
         acceptEdits) case "$tool" in Edit|Write|MultiEdit) MODE="event" ;; esac ;;
       esac
     fi
@@ -53,6 +54,17 @@ enum EmbeddedScripts {
         "$NOTCH_SERVER/api/permissions/$id/decision?wait=55" 2>/dev/null)" || exit 0
       decision="$(jq -r '.decision // empty' <<<"$dec" 2>/dev/null)"
       reason="$(jq -r '.reason // "Decided via Notch"' <<<"$dec" 2>/dev/null)"
+
+      # Answering an AskUserQuestion means allow + updatedInput carrying the
+      # selections (Claude Code >= 2.1.133); an allow without answers would run
+      # the tool unanswered — stay silent so the terminal picker appears.
+      if [ "$tool" = "AskUserQuestion" ] && [ "$decision" = "allow" ]; then
+        answers="$(jq -c '.answers // empty' <<<"$dec" 2>/dev/null)"
+        { [ -n "$answers" ] && [ "$answers" != "{}" ]; } || exit 0
+        jq -cn --argjson input "$(jq -c '.tool_input // {}' <<<"$payload")" --argjson ans "$answers" \
+          '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "allow", updatedInput: ($input + {answers: $ans})}}'
+        exit 0
+      fi
 
       case "$decision" in
         allow|deny)
@@ -122,7 +134,7 @@ enum EmbeddedScripts {
       | .hooks.PostToolUse       = (((.hooks.PostToolUse // [])       | strip) + [{hooks: [{type: "command", command: $ev}]}])
       | .hooks.Stop              = (((.hooks.Stop // [])              | strip) + [{hooks: [{type: "command", command: $ev}]}])
       | .hooks.SessionEnd        = (((.hooks.SessionEnd // [])        | strip) + [{hooks: [{type: "command", command: $ev}]}])
-      | .hooks.PreToolUse        = (((.hooks.PreToolUse // [])        | strip) + [{matcher: "Bash|Write|Edit|MultiEdit|ExitPlanMode", hooks: [{type: "command", command: $perm, timeout: 60}]}, {matcher: "AskUserQuestion", hooks: [{type: "command", command: $ev}]}])
+      | .hooks.PreToolUse        = (((.hooks.PreToolUse // [])        | strip) + [{matcher: "Bash|Write|Edit|MultiEdit|ExitPlanMode|AskUserQuestion", hooks: [{type: "command", command: $perm, timeout: 60}]}])
     ' "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
 
     echo "done — new Claude Code sessions on this machine report to __SERVER__"
