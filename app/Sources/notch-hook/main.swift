@@ -1,6 +1,7 @@
 // Dependency-free agent hook for macOS (replaces the bash+jq script locally).
 //   notch-hook event         — Claude Code: fire-and-forget event report
 //   notch-hook permission    — Claude Code PreToolUse: allow/deny gate (long-poll)
+//   notch-hook statusline    — Claude Code statusline: report plan usage, render text
 //   notch-hook cursor-event  — Cursor: translate + report event
 //   notch-hook cursor-shell  — Cursor beforeShellExecution: allow/deny/ask gate
 // Fails safe on every path: Claude Code falls back to its terminal prompt;
@@ -136,6 +137,48 @@ case "permission":
             "permissionDecision": decision,
             "permissionDecisionReason": reason,
         ]])
+    }
+
+case "statusline":
+    // Statusline fires constantly while Claude works — throttle the report to
+    // one POST a minute (usage moves slowly) so rendering stays snappy.
+    if let limits = raw["rate_limits"] as? [String: Any] {
+        let fm = FileManager.default
+        let stamp = fm.homeDirectoryForCurrentUser.appendingPathComponent(".notch/usage-posted")
+        let modified = (try? fm.attributesOfItem(atPath: stamp.path))?[.modificationDate] as? Date
+        if modified.map({ Date().timeIntervalSince($0) > 60 }) ?? true {
+            try? Data().write(to: stamp)
+            _ = request("POST", "/api/usage", body: ["machine": machine, "rate_limits": limits], timeout: 1)
+        }
+    }
+    // Render: hand off to the statusline this install replaced, if any.
+    let origURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".notch/statusline-orig")
+    if let cmd = (try? String(contentsOf: origURL, encoding: .utf8))?
+        .trimmingCharacters(in: .whitespacesAndNewlines), !cmd.isEmpty {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = ["-c", cmd]
+        let stdin = Pipe(), stdout = Pipe()
+        process.standardInput = stdin
+        process.standardOutput = stdout
+        process.standardError = FileHandle.nullDevice
+        if (try? process.run()) != nil {
+            stdin.fileHandleForWriting.write(stdinData)
+            try? stdin.fileHandleForWriting.close()
+            let out = stdout.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            FileHandle.standardOutput.write(out)
+        }
+    } else {
+        let model = (raw["model"] as? [String: Any])?["display_name"] as? String ?? "Claude"
+        var parts = [model]
+        func pct(_ key: String) -> Int? {
+            ((raw["rate_limits"] as? [String: Any])?[key] as? [String: Any])?["used_percentage"]
+                .flatMap { $0 as? Double }.map { Int($0.rounded()) }
+        }
+        if let five = pct("five_hour") { parts.append("5h \(five)%") }
+        if let seven = pct("seven_day") { parts.append("7d \(seven)%") }
+        print(parts.joined(separator: " · "))
     }
 
 case "cursor-shell":

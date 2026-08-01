@@ -108,6 +108,17 @@ final class EmbeddedServer {
             return ok ? self.json(["ok": true]) : self.json(["error": "missing machine or session_id"], status: .badRequest)
         }
 
+        await server.appendRoute("POST /api/usage") { [weak self] request in
+            guard let self else { return HTTPResponse(statusCode: .serviceUnavailable) }
+            guard self.machineOK(request) else { return self.unauthorized }
+            struct Payload: Decodable { let rate_limits: UsageInfo }
+            guard let body = try? await request.bodyData,
+                  let payload = try? JSONDecoder().decode(Payload.self, from: body)
+            else { return self.json(["error": "bad rate_limits"], status: .badRequest) }
+            await MainActor.run { model.applyUsage(payload.rate_limits) }
+            return self.json(["ok": true])
+        }
+
         await server.appendRoute("GET /api/sessions") { [weak self] request in
             guard let self else { return HTTPResponse(statusCode: .serviceUnavailable) }
             guard self.operatorOK(request) else { return self.unauthorized }
@@ -266,6 +277,18 @@ enum LocalSetup {
         hooks["PreToolUse"] = stripped(hooks["PreToolUse"])
             + [entry(mode: "permission", matcher: "Bash|Write|Edit|MultiEdit|ExitPlanMode|AskUserQuestion", timeout: 60)]
         settings["hooks"] = hooks
+
+        // Statusline is the only official source of plan usage (5h/7d limits).
+        // Ours posts rate_limits to the server; a pre-existing statusline is
+        // preserved in ~/.notch/statusline-orig and still renders the text.
+        let statusCommand = "\(command) statusline"
+        if let existing = (settings["statusLine"] as? [String: Any])?["command"] as? String,
+           !existing.contains("notch-hook") {
+            let orig = notchDir.appendingPathComponent("statusline-orig")
+            try? existing.write(to: orig, atomically: true, encoding: .utf8)
+            try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: orig.path)
+        }
+        settings["statusLine"] = ["type": "command", "command": statusCommand]
 
         let output = try JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys])
         try output.write(to: settingsURL)

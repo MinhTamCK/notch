@@ -231,6 +231,9 @@ struct ExpandedView: View {
             if showSettings {
                 SettingsSection(model: model)
             } else {
+            if let usage = model.usage {
+                UsageRow(usage: usage)
+            }
             if !pending.isEmpty {
                 VStack(spacing: 8) {
                     ForEach(pending) { request in
@@ -571,6 +574,68 @@ struct PermissionCard: View {
             markdown: markdown,
             options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         )) ?? AttributedString(markdown)
+    }
+}
+
+// MARK: - Usage row (Claude plan rate limits)
+
+/// "USAGE 5h ▰▰▰▱▱▱▱▱ 38% · 7d ▰▱▱▱▱▱▱▱ 11% · resets 4h11m" — fed by the
+/// statusline hook; percentages self-zero once their reset time passes.
+struct UsageRow: View {
+    let usage: UsageInfo
+
+    var body: some View {
+        TimelineView(.everyMinute) { context in
+            let now = context.date
+            HStack(spacing: 10) {
+                Text("USAGE")
+                    .font(.system(size: 8, weight: .bold))
+                    .tracking(1.2)
+                    .foregroundStyle(.secondary)
+                if let window = usage.five_hour { windowView("5h", window, now: now) }
+                if let window = usage.seven_day { windowView("7d", window, now: now) }
+                Spacer()
+                if let reset = usage.five_hour?.resetDate(now: now) ?? usage.seven_day?.resetDate(now: now) {
+                    Text("resets \(countdown(to: reset, from: now))")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .fixedSize()
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(RoundedRectangle(cornerRadius: 7).fill(cardBackground))
+        }
+    }
+
+    private func windowView(_ label: String, _ window: UsageWindow, now: Date) -> some View {
+        let pct = window.percent(now: now)
+        let filled = Int((pct / 100 * 8).rounded())
+        let color: Color = pct >= 90 ? .red : pct >= 75 ? .orange : .green
+        return HStack(spacing: 4) {
+            Text(label)
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .fixedSize()
+            HStack(spacing: 1.5) {
+                ForEach(0..<8, id: \.self) { segment in
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(segment < filled ? color : Color.white.opacity(0.15))
+                        .frame(width: 5, height: 7)
+                }
+            }
+            Text("\(Int(pct.rounded()))%")
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .fixedSize()
+        }
+    }
+
+    private func countdown(to date: Date, from now: Date) -> String {
+        let seconds = max(0, Int(date.timeIntervalSince(now)))
+        let hours = seconds / 3600
+        let minutes = (seconds % 3600) / 60
+        if hours > 24 { return "\(hours / 24)d\(hours % 24)h" }
+        return hours > 0 ? "\(hours)h\(String(format: "%02d", minutes))m" : "\(minutes)m"
     }
 }
 

@@ -64,6 +64,36 @@ export type ChangeMessage =
   | { type: 'session_removed'; key: string }
   | { type: 'permission'; request: PermissionRequest }
   | { type: 'permission_resolved'; id: string; decision: Decision; reason?: string }
+  | { type: 'usage'; usage: UsageInfo }
+
+/** Claude plan rate limits (statusline field names, Pro/Max only). */
+export interface UsageWindow {
+  used_percentage: number
+  resets_at?: number
+}
+
+export interface UsageInfo {
+  five_hour?: UsageWindow
+  seven_day?: UsageWindow
+  updatedAt?: number
+}
+
+/** Untrusted transport value → a clean UsageInfo, or undefined. */
+export function cleanUsage(raw: unknown): UsageInfo | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const pick = (w: unknown): UsageWindow | undefined => {
+    if (!w || typeof w !== 'object') return undefined
+    const o = w as Record<string, unknown>
+    if (typeof o.used_percentage !== 'number' || !isFinite(o.used_percentage)) return undefined
+    return {
+      used_percentage: o.used_percentage,
+      resets_at: typeof o.resets_at === 'number' ? o.resets_at : undefined,
+    }
+  }
+  const r = raw as Record<string, unknown>
+  const usage: UsageInfo = { five_hour: pick(r.five_hour), seven_day: pick(r.seven_day) }
+  return usage.five_hour || usage.seven_day ? usage : undefined
+}
 
 // Configurable via ~/.notch/env: NOTCH_STALE_MINUTES / NOTCH_RETAIN_HOURS.
 const STALE_AFTER_MS = (Number(process.env.NOTCH_STALE_MINUTES) || 15) * 60 * 1000
@@ -129,6 +159,7 @@ function describeTool(name: string, input?: Record<string, unknown>): string {
 export class Store {
   sessions = new Map<string, Session>()
   permissions = new Map<string, PermissionRequest>()
+  usage?: UsageInfo
   private waiters = new Map<string, ((r: PermissionRequest) => void)[]>()
   private listeners: ((msg: ChangeMessage) => void)[] = []
   private logFile: string
@@ -160,7 +191,17 @@ export class Store {
     return {
       sessions: [...this.sessions.values()].sort((a, b) => b.updatedAt - a.updatedAt),
       permissions: [...this.permissions.values()].filter(p => !p.decision),
+      usage: this.usage,
     }
+  }
+
+  setUsage(raw: unknown): UsageInfo | undefined {
+    const usage = cleanUsage(raw)
+    if (!usage) return undefined
+    usage.updatedAt = Date.now()
+    this.usage = usage
+    this.emit({ type: 'usage', usage })
+    return usage
   }
 
   private upsert(env: HookEnvelope): Session {

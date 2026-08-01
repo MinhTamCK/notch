@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { Store, redact, describeQuestion } from './state.js'
+import { Store, redact, describeQuestion, cleanUsage } from './state.js'
 
 describe('describeQuestion', () => {
   it('summarizes the question with its option labels', () => {
@@ -42,6 +42,28 @@ describe('AskUserQuestion permissions', () => {
     const decided = await pending
     expect(decided.decision).toBe('allow')
     expect(decided.answers).toEqual({ 'Which?': 'A' })
+  })
+})
+
+describe('usage reporting', () => {
+  it('accepts statusline rate_limits and includes them in the snapshot', () => {
+    const store = new Store(mkdtempSync(path.join(tmpdir(), 'notch-test-')))
+    const usage = store.setUsage({
+      five_hour: { used_percentage: 38.5, resets_at: 1738425600 },
+      seven_day: { used_percentage: 11.2, resets_at: 1738857600 },
+    })
+    expect(usage?.five_hour?.used_percentage).toBe(38.5)
+    expect(store.snapshot().usage?.seven_day?.resets_at).toBe(1738857600)
+  })
+
+  it('rejects malformed payloads and junk fields', () => {
+    expect(cleanUsage(null)).toBeUndefined()
+    expect(cleanUsage('nope')).toBeUndefined()
+    expect(cleanUsage({ five_hour: { used_percentage: 'high' } })).toBeUndefined()
+    const cleaned = cleanUsage({
+      five_hour: { used_percentage: 5, resets_at: 'soon', extra: true },
+    })
+    expect(cleaned).toEqual({ five_hour: { used_percentage: 5, resets_at: undefined }, seven_day: undefined })
   })
 })
 

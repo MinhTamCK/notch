@@ -15,6 +15,7 @@ final class AppModel: ObservableObject {
 
     @Published private(set) var sessions: [String: Session] = [:]
     @Published private(set) var pendingPermissions: [String: PermissionRequest] = [:]
+    @Published private(set) var usage: UsageInfo?
     @Published private(set) var connection: ConnectionState = .disconnected
     @Published private(set) var serverDescription = ""
     @Published var soundEnabled: Bool = UserDefaults.standard.object(forKey: "soundEnabled") as? Bool ?? true {
@@ -342,6 +343,7 @@ final class AppModel: ObservableObject {
             // wins — Dictionary(uniqueKeysWithValues:) would crash on duplicates.
             sessions = Dictionary((message.sessions ?? []).map { ($0.key, $0) }, uniquingKeysWith: { _, new in new })
             pendingPermissions = Dictionary((message.permissions ?? []).map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
+            if let usage = message.usage { self.usage = usage }
             // Alert (not just expand) so attention that arrived while disconnected isn't silent.
             if attentionCount > 0 {
                 alert()
@@ -363,6 +365,8 @@ final class AppModel: ObservableObject {
         case "permission_resolved":
             guard let id = message.id else { return }
             pendingPermissions.removeValue(forKey: id)
+        case "usage":
+            if let usage = message.usage { self.usage = usage }
         case "session_removed":
             guard let key = message.key else { return }
             sessions.removeValue(forKey: key)
@@ -514,6 +518,13 @@ final class AppModel: ObservableObject {
         sessions[key] = s
         sessionStateChanged(from: previous, to: s.state)
         return true
+    }
+
+    /// Hosting mode: statusline reported fresh rate limits.
+    func applyUsage(_ info: UsageInfo) {
+        var stamped = info
+        stamped.updatedAt = Date().timeIntervalSince1970 * 1000
+        usage = stamped
     }
 
     func createPermission(_ env: HookEnvelope) -> String? {

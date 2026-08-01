@@ -32,6 +32,31 @@ enum EmbeddedScripts {
 
     auth=(-H "Authorization: Bearer $NOTCH_TOKEN" -H "Content-Type: application/json")
 
+    # Statusline: report plan usage (throttled — statusline fires constantly),
+    # then render: the replaced statusline if one was preserved, else a default.
+    if [ "$MODE" = "statusline" ]; then
+      limits="$(jq -c '.rate_limits // empty' <<<"$payload" 2>/dev/null)"
+      stamp="$HOME/.notch/usage-posted"
+      last="$(stat -c %Y "$stamp" 2>/dev/null || stat -f %m "$stamp" 2>/dev/null || echo 0)"
+      if [ -n "$limits" ] && [ $(( $(date +%s) - last )) -gt 60 ]; then
+        touch "$stamp"
+        jq -cn --arg machine "$NOTCH_MACHINE" --argjson rl "$limits" '{machine: $machine, rate_limits: $rl}' \
+          | curl -sS -m 1 "${auth[@]}" -d @- "$NOTCH_SERVER/api/usage" >/dev/null 2>&1 &
+      fi
+      if [ -s "$HOME/.notch/statusline-orig" ]; then
+        printf '%s' "$payload" | bash -c "$(cat "$HOME/.notch/statusline-orig")"
+      else
+        model="$(jq -r '.model.display_name // "Claude"' <<<"$payload" 2>/dev/null)"
+        five="$(jq -r '.rate_limits.five_hour.used_percentage // empty | round' <<<"$payload" 2>/dev/null)"
+        seven="$(jq -r '.rate_limits.seven_day.used_percentage // empty | round' <<<"$payload" 2>/dev/null)"
+        line="$model"
+        [ -n "$five" ] && line="$line · 5h $five%"
+        [ -n "$seven" ] && line="$line · 7d $seven%"
+        echo "$line"
+      fi
+      exit 0
+    fi
+
     # Respect the session's permission mode: only gate tools Claude Code itself would
     # prompt for. Bypass/auto/dontAsk sessions are monitor-only; acceptEdits skips
     # the gate for edit tools but still gates Bash and plans. AskUserQuestion
@@ -124,8 +149,17 @@ enum EmbeddedScripts {
 
     HOOK_CMD_EVENT='"$HOME/.notch/notch-hook.sh" event'
     HOOK_CMD_PERM='"$HOME/.notch/notch-hook.sh" permission'
+    HOOK_CMD_SL='"$HOME/.notch/notch-hook.sh" statusline'
 
-    jq --arg ev "$HOOK_CMD_EVENT" --arg perm "$HOOK_CMD_PERM" '
+    # Keep a pre-existing statusline: ours will chain to it after reporting usage.
+    orig_sl="$(jq -r '.statusLine.command // empty' "$SETTINGS")"
+    case "$orig_sl" in
+      ""|*notch-hook*) ;;
+      *) printf '%s\n' "$orig_sl" > "$HOME/.notch/statusline-orig"
+         chmod 600 "$HOME/.notch/statusline-orig" ;;
+    esac
+
+    jq --arg ev "$HOOK_CMD_EVENT" --arg perm "$HOOK_CMD_PERM" --arg sl "$HOOK_CMD_SL" '
       def strip: map(select(((.hooks // []) | any(.command // "" | contains("notch-hook"))) | not));
       .hooks = (.hooks // {})
       | .hooks.SessionStart      = (((.hooks.SessionStart // [])      | strip) + [{hooks: [{type: "command", command: $ev}]}])
@@ -135,6 +169,7 @@ enum EmbeddedScripts {
       | .hooks.Stop              = (((.hooks.Stop // [])              | strip) + [{hooks: [{type: "command", command: $ev}]}])
       | .hooks.SessionEnd        = (((.hooks.SessionEnd // [])        | strip) + [{hooks: [{type: "command", command: $ev}]}])
       | .hooks.PreToolUse        = (((.hooks.PreToolUse // [])        | strip) + [{matcher: "Bash|Write|Edit|MultiEdit|ExitPlanMode|AskUserQuestion", hooks: [{type: "command", command: $perm, timeout: 60}]}])
+      | .statusLine              = {type: "command", command: $sl}
     ' "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
 
     echo "done — new Claude Code sessions on this machine report to __SERVER__"

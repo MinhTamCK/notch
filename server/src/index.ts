@@ -66,6 +66,14 @@ app.post('/api/permissions', requireRole('machine'), async c => {
   return c.json({ id: req.id })
 })
 
+// Statusline scripts report the account's plan usage (5h/7d rate limits).
+app.post('/api/usage', requireRole('machine'), async c => {
+  const body = await c.req.json<{ rate_limits?: unknown }>()
+  const usage = store.setUsage(body.rate_limits)
+  if (!usage) return c.json({ error: 'bad rate_limits' }, 400)
+  return c.json({ ok: true })
+})
+
 app.get('/api/permissions/:id/decision', requireRole('machine'), async c => {
   const waitSec = Math.min(Number(c.req.query('wait') ?? 0), MAX_WAIT_SEC)
   const pending = store.waitForDecision(c.req.param('id'), waitSec * 1000)

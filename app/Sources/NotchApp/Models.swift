@@ -186,4 +186,32 @@ struct ServerMessage: Decodable {
     let id: String?
     let decision: String?
     let key: String?
+    let usage: UsageInfo?
+}
+
+/// Claude plan rate limits, as reported by the statusline (Pro/Max only).
+/// Field names mirror Claude Code's statusline JSON so the value passes
+/// through hook → server → app unchanged.
+struct UsageWindow: Codable, Equatable {
+    let used_percentage: Double
+    let resets_at: Double?
+
+    /// The window silently resets while no session is running — after
+    /// `resets_at`, the last reported percentage is stale and means 0.
+    func percent(now: Date = Date()) -> Double {
+        if let resets_at, now.timeIntervalSince1970 >= resets_at { return 0 }
+        return min(max(used_percentage, 0), 100)
+    }
+
+    func resetDate(now: Date = Date()) -> Date? {
+        guard let resets_at else { return nil }
+        let date = Date(timeIntervalSince1970: resets_at)
+        return date > now ? date : nil
+    }
+}
+
+struct UsageInfo: Codable, Equatable {
+    let five_hour: UsageWindow?
+    let seven_day: UsageWindow?
+    var updatedAt: Double?
 }
