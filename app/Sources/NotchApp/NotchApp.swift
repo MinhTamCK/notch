@@ -20,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var isExpanded = false
     private var clickMonitor: Any?
     private var compactDebounce: Task<Void, Never>?
+    private var transition: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -121,7 +122,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private func setNotch(expanded: Bool) {
         guard let notch, let screen = NSScreen.screens.first else { return }
         isExpanded = expanded
-        Task { @MainActor in
+        // Transitions queue behind each other — overlapping expand/compact used
+        // to interleave inside the kit and wedge it (panel stopped popping until
+        // relaunch). Stale entries skip themselves: only the latest target runs.
+        let previous = transition
+        transition = Task { @MainActor in
+            await previous?.value
+            guard expanded == self.isExpanded else { return }
             if expanded {
                 await notch.expand(on: screen)
             } else {

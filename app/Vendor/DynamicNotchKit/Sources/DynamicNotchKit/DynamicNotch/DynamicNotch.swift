@@ -193,21 +193,20 @@ extension DynamicNotch {
             // Now show window with animation already in progress
             showWindow()
         } else {
-            // Window exists and we're transitioning from compact state
-            Task { @MainActor in
-                if !skipHide {
-                    withAnimation(effectiveClosingAnimation) {
-                        self.state = .hidden
-                    }
-
-                    guard self.state == .hidden else { return }
-
-                    try? await Task.sleep(for: .seconds(0.25))
+            // Window exists and we're transitioning from compact state.
+            // Inline (not a detached Task): callers await the full transition,
+            // so overlapping expand/compact calls can't interleave mid-sleep
+            // and desync `state` from what's actually on screen.
+            if !skipHide {
+                withAnimation(effectiveClosingAnimation) {
+                    self.state = .hidden
                 }
 
-                withAnimation(effectiveConversionAnimation) {
-                    self.state = .expanded
-                }
+                try? await Task.sleep(for: .seconds(0.25))
+            }
+
+            withAnimation(effectiveConversionAnimation) {
+                self.state = .expanded
             }
         }
 
@@ -249,21 +248,18 @@ extension DynamicNotch {
             // Now show window with animation already in progress
             showWindow()
         } else {
-            // Window exists and we're transitioning from expanded state
-            Task { @MainActor in
-                if !skipHide {
-                    withAnimation(effectiveClosingAnimation) {
-                        self.state = .hidden
-                    }
-
-                    try? await Task.sleep(for: .seconds(0.25))
-
-                    guard self.state == .hidden else { return }
+            // Window exists and we're transitioning from expanded state.
+            // Inline for the same reason as _expand: no detached-task races.
+            if !skipHide {
+                withAnimation(effectiveClosingAnimation) {
+                    self.state = .hidden
                 }
 
-                withAnimation(effectiveConversionAnimation) {
-                    self.state = .compact
-                }
+                try? await Task.sleep(for: .seconds(0.25))
+            }
+
+            withAnimation(effectiveConversionAnimation) {
+                self.state = .compact
             }
         }
 

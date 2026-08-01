@@ -677,6 +677,10 @@ struct QuestionCard: View {
                 Text("Claude is asking a question that needs the terminal.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            } else if questions.count == 1, let question = questions.first {
+                // A single question always fits. Skip the ScrollView: its ideal-size
+                // negotiation fights the notch window's auto-height and clips options.
+                questionBlock(question, number: nil)
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
