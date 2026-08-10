@@ -15,6 +15,7 @@ struct NotchApp: App {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     let model = AppModel()
+    let systemStats = SystemStatsModel()
     private var notch: DynamicNotch<ExpandedView, CompactLeadingView, CompactTrailingView>?
     private var autoExpanded = false
     private var isExpanded = false
@@ -26,12 +27,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         NSApp.setActivationPolicy(.accessory)
 
         let model = self.model
+        let systemStats = self.systemStats
         notch = DynamicNotch(hoverBehavior: [.keepVisible, .increaseShadow]) {
             ExpandedView(model: model)
         } compactLeading: {
             CompactLeadingView(model: model)
         } compactTrailing: {
-            CompactTrailingView(model: model)
+            CompactTrailingView(model: model, systemStats: systemStats)
         }
 
         model.requestExpand = { [weak self] in
@@ -90,6 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         }
 
         model.start()
+        systemStats.start()
         setNotch(expanded: false)
     }
 

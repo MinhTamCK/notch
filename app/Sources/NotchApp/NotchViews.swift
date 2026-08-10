@@ -159,8 +159,49 @@ struct CompactLeadingView: View {
     }
 }
 
+/// CPU/GPU/RAM/SSD block for the closed notch, styled after mac-stats:
+/// dim label on top, blue percentage below.
+struct SystemStatsView: View {
+    @ObservedObject var stats: SystemStatsModel
+
+    var body: some View {
+        HStack(spacing: 7) {
+            cell("CPU", stats.stats.cpu)
+            cell("GPU", stats.stats.gpu)
+            cell("RAM", stats.stats.ram)
+            cell("SSD", stats.stats.ssd)
+        }
+    }
+
+    private func cell(_ label: String, _ value: Double?) -> some View {
+        VStack(spacing: 0) {
+            Text(label)
+                .font(.system(size: 7.5, weight: .semibold))
+                .foregroundStyle(.secondary)
+            valueText(value)
+                .monospacedDigit()
+                .foregroundStyle(Color(red: 0.35, green: 0.65, blue: 1.0))
+        }
+        // Fixed width so 9% → 10% flips don't wobble the notch.
+        .frame(width: 27)
+    }
+
+    /// Number with a smaller %, baseline-aligned so the pair stays centered
+    /// under the label.
+    private func valueText(_ value: Double?) -> Text {
+        guard let value else {
+            return Text("–").font(.system(size: 10, weight: .bold))
+        }
+        return Text("\(Int((value * 100).rounded()))")
+            .font(.system(size: 10, weight: .bold))
+            + Text("%")
+            .font(.system(size: 7, weight: .bold))
+    }
+}
+
 struct CompactTrailingView: View {
     @ObservedObject var model: AppModel
+    let systemStats: SystemStatsModel
 
     /// Unique agents currently in the session list, most recent first.
     private var activeAgents: [String] {
@@ -173,28 +214,31 @@ struct CompactTrailingView: View {
     }
 
     var body: some View {
-        Group {
-            if model.attentionCount > 0 {
-                HStack(spacing: 3) {
-                    Image(systemName: "bell.badge.fill")
-                        .foregroundStyle(.orange)
-                        .symbolEffect(.pulse, options: .repeating, isActive: true)
-                    Text("\(model.attentionCount)")
-                        .fontWeight(.semibold)
-                        .monospacedDigit()
-                }
-            } else if model.connection != .connected {
-                Image(systemName: "wifi.slash")
-                    .foregroundStyle(.secondary)
-            } else if !activeAgents.isEmpty {
-                HStack(spacing: 3) {
-                    ForEach(activeAgents, id: \.self) { agent in
-                        AgentBadge(agent: agent, size: 13)
+        HStack(spacing: 8) {
+            SystemStatsView(stats: systemStats)
+            Group {
+                if model.attentionCount > 0 {
+                    HStack(spacing: 3) {
+                        Image(systemName: "bell.badge.fill")
+                            .foregroundStyle(.orange)
+                            .symbolEffect(.pulse, options: .repeating, isActive: true)
+                        Text("\(model.attentionCount)")
+                            .fontWeight(.semibold)
+                            .monospacedDigit()
+                    }
+                } else if model.connection != .connected {
+                    Image(systemName: "wifi.slash")
+                        .foregroundStyle(.secondary)
+                } else if !activeAgents.isEmpty {
+                    HStack(spacing: 3) {
+                        ForEach(activeAgents, id: \.self) { agent in
+                            AgentBadge(agent: agent, size: 13)
+                        }
                     }
                 }
             }
+            .font(.caption)
         }
-        .font(.caption)
     }
 }
 
