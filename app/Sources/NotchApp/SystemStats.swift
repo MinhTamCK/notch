@@ -137,3 +137,36 @@ enum SystemStatsReader {
         return min(max((total - free) / total, 0), 1)
     }
 }
+
+// MARK: - Lid-closed wake
+
+/// A closed lid puts the Mac to sleep and takes every running Claude Code
+/// session with it. The only switch for that is the system-wide `SleepDisabled`
+/// flag: readable straight off IOPMrootDomain, but writable only as root — so
+/// flipping it goes through an admin prompt.
+enum LidAwake {
+    static var isEnabled: Bool {
+        let root = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPMrootDomain"))
+        guard root != 0 else { return false }
+        defer { IOObjectRelease(root) }
+        let value = IORegistryEntryCreateCFProperty(root, "SleepDisabled" as CFString, kCFAllocatorDefault, 0)
+        return ((value?.takeRetainedValue() as? NSNumber)?.boolValue) ?? false
+    }
+
+    /// Blocks on the authorization dialog — call this off the main actor.
+    /// Returns false when the user cancels it.
+    @discardableResult
+    static func set(_ enabled: Bool) -> Bool {
+        // -a covers both power sources: the lid stays live on battery too.
+        let script = "do shell script \"/usr/bin/pmset -a disablesleep \(enabled ? 1 : 0)\""
+            + " with administrator privileges"
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", script]
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+        guard (try? process.run()) != nil else { return false }
+        process.waitUntilExit()
+        return process.terminationStatus == 0
+    }
+}

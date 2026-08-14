@@ -398,6 +398,8 @@ struct SettingsSection: View {
     @State private var copied = false
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var tailscaleAddress: String?
+    @State private var lidAwake = LidAwake.isEnabled
+    @State private var applyingLidAwake = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -491,6 +493,19 @@ struct SettingsSection: View {
             }
 
             settingRow(
+                title: "Keep awake with lid closed",
+                subtitle: lidAwake
+                    ? "Sleep is off on battery and power \u{2014} until you switch this back"
+                    : "Sessions keep running with the lid shut (asks for your admin password)"
+            ) {
+                Toggle("", isOn: Binding(get: { lidAwake }, set: setLidAwake))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .disabled(applyingLidAwake)
+            }
+
+            settingRow(
                 title: "Alert on \u{201C}your turn\u{201D}",
                 subtitle: "Ping when Claude finishes and waits for you"
             ) {
@@ -510,10 +525,26 @@ struct SettingsSection: View {
             }
             .padding(.top, 2)
         }
-        .onAppear { model.checkForUpdates() }
+        .onAppear {
+            model.checkForUpdates()
+            lidAwake = LidAwake.isEnabled
+        }
         // `tailscale ip` shells out and can block for seconds; keep it off the main thread.
         .task {
             tailscaleAddress = await Task.detached { RemoteAdd.tailscaleAddress() }.value
+        }
+    }
+
+    /// The switch flips right away, then settles on whatever the system
+    /// reports — the admin prompt can be cancelled.
+    private func setLidAwake(_ enable: Bool) {
+        guard !applyingLidAwake else { return }
+        applyingLidAwake = true
+        lidAwake = enable
+        Task {
+            _ = await Task.detached { LidAwake.set(enable) }.value
+            lidAwake = LidAwake.isEnabled
+            applyingLidAwake = false
         }
     }
 

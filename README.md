@@ -11,6 +11,7 @@ Monitor **and remotely approve** your Claude Code and Cursor sessions from your 
 - **See every session at a glance** — live status (working · waiting · done) of all your Claude Code and Cursor agents, right in the MacBook notch.
 - **Approve from the notch** — permission requests pop up with an inline diff (for edits), the command (for shell), or a Markdown plan preview. Hit **Allow** or **Deny** without leaving what you're doing.
 - **Alerts that matter** — sound + auto-expand when a session needs you; opt-in "your turn" ping when a turn finishes.
+- **Keep running with the lid closed** — one toggle stops the Mac sleeping on lid-close, on battery or plugged in, so sessions keep going while the screen is locked.
 - **Self-contained** — the app *is* the server. Open it and it hosts everything locally, zero config.
 - **Private by design** — traffic is restricted to loopback + your Tailscale network, guarded by two-role tokens. No cloud, no telemetry.
 
