@@ -75,7 +75,10 @@ enum EmbeddedScripts {
       # There is no terminal prompt to relocate there, and `--allowedTools` pre-approval
       # leaves permission_mode at "default" — gating would invent an approval the session
       # never had and stall it 55s per call. NOTCH_GATE_HEADLESS=1 opts back in.
-      if [ "${CLAUDE_CODE_ENTRYPOINT-}" = "sdk-cli" ] && [ "$NOTCH_GATE_HEADLESS" != "1" ]; then
+      # AskUserQuestion is still gated even headless: the notch answers it via
+      # updatedInput, and there is no terminal picker to fall back to.
+      if [ "${CLAUDE_CODE_ENTRYPOINT-}" = "sdk-cli" ] && [ "$NOTCH_GATE_HEADLESS" != "1" ] \
+        && [ "$tool" != "AskUserQuestion" ]; then
         MODE="event"
       fi
     fi
