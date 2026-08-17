@@ -13,15 +13,18 @@ enum EmbeddedScripts {
     MODE="${1:-event}"
     # Caller-provided env wins over ~/.notch/env (matches the compiled notch-hook).
     _ns="${NOTCH_SERVER-}"; _nt="${NOTCH_TOKEN-}"; _nm="${NOTCH_MACHINE-}"; _nr="${NOTCH_REMOTE_APPROVE-}"
+    _nh="${NOTCH_GATE_HEADLESS-}"
     [ -f "$HOME/.notch/env" ] && . "$HOME/.notch/env"
     [ -n "$_ns" ] && NOTCH_SERVER="$_ns"
     [ -n "$_nt" ] && NOTCH_TOKEN="$_nt"
     [ -n "$_nm" ] && NOTCH_MACHINE="$_nm"
     [ -n "$_nr" ] && NOTCH_REMOTE_APPROVE="$_nr"
+    [ -n "$_nh" ] && NOTCH_GATE_HEADLESS="$_nh"
     NOTCH_SERVER="${NOTCH_SERVER:-http://localhost:4519}"
     NOTCH_TOKEN="${NOTCH_TOKEN:-}"
     NOTCH_MACHINE="${NOTCH_MACHINE:-$(hostname -s)}"
     NOTCH_REMOTE_APPROVE="${NOTCH_REMOTE_APPROVE:-1}"
+    NOTCH_GATE_HEADLESS="${NOTCH_GATE_HEADLESS:-0}"
 
     payload="$(cat)" || exit 0
     command -v jq >/dev/null 2>&1 || exit 0
@@ -68,6 +71,13 @@ enum EmbeddedScripts {
         bypassPermissions|auto|dontAsk) [ "$tool" = "AskUserQuestion" ] || MODE="event" ;;
         acceptEdits) case "$tool" in Edit|Write|MultiEdit) MODE="event" ;; esac ;;
       esac
+      # Headless sessions (`claude -p`, Agent SDK) set CLAUDE_CODE_ENTRYPOINT=sdk-cli.
+      # There is no terminal prompt to relocate there, and `--allowedTools` pre-approval
+      # leaves permission_mode at "default" — gating would invent an approval the session
+      # never had and stall it 55s per call. NOTCH_GATE_HEADLESS=1 opts back in.
+      if [ "${CLAUDE_CODE_ENTRYPOINT-}" = "sdk-cli" ] && [ "$NOTCH_GATE_HEADLESS" != "1" ]; then
+        MODE="event"
+      fi
     fi
 
     if [ "$MODE" = "permission" ] && [ "$NOTCH_REMOTE_APPROVE" != "0" ]; then
@@ -135,6 +145,8 @@ enum EmbeddedScripts {
     NOTCH_TOKEN="__TOKEN__"
     NOTCH_MACHINE="$(hostname -s)"
     NOTCH_REMOTE_APPROVE=1
+    # Set to 1 to also gate headless (`claude -p` / SDK) sessions from the notch:
+    NOTCH_GATE_HEADLESS=0
     EOF
       )
       chmod 600 "$HOME/.notch/env"

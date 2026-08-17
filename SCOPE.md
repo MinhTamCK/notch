@@ -55,9 +55,15 @@ Caveats (accepted for v1):
   exists). If a remotely-approved plan lands in an unexpected mode, that's upstream.
 - Hook matcher scoped to `Bash|Write|Edit|MultiEdit|ExitPlanMode` so cheap read-only tools
   don't round-trip to the server.
-- Matched tools that the VM's allowlist would have auto-approved still wait on the remote
-  decision (or timeout→ask). Mitigation: per-VM env toggle `NOTCH_REMOTE_APPROVE=0` to make
-  the hook fire-and-forget (monitor only). Smarter allowlist passthrough is v1.1.
+- Headless sessions (`claude -p`, Agent SDK) are monitor-only: they set
+  `CLAUDE_CODE_ENTRYPOINT=sdk-cli`, have no terminal prompt to relocate, and their
+  `--allowedTools` pre-approval leaves `permission_mode` at `default` — gating there would
+  invent an approval the session never had and stall it 55s per call.
+  `NOTCH_GATE_HEADLESS=1` opts back in.
+- Still open: an *interactive* session whose `settings.json` `permissions.allow` would have
+  auto-approved a matched tool waits on the remote decision (or timeout→ask). The hook can't
+  see those rules — the `PreToolUse` payload carries no allowlist. Mitigation:
+  `NOTCH_REMOTE_APPROVE=0` for monitor-only.
 
 ### Components
 

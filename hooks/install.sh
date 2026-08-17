@@ -31,6 +31,8 @@ NOTCH_TOKEN="${NOTCH_TOKEN}"
 NOTCH_MACHINE="${NOTCH_MACHINE:-$(hostname -s)}"
 # Set to 0 to disable remote approval (monitor-only) on this machine:
 NOTCH_REMOTE_APPROVE=1
+# Set to 1 to also gate headless (\`claude -p\` / SDK) sessions from the notch:
+NOTCH_GATE_HEADLESS=0
 EOF
   )
   chmod 600 "$NOTCH_DIR/env"

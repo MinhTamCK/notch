@@ -112,7 +112,14 @@ case "permission":
     // AskUserQuestion prompts in every mode, so it's always gated.
     let pm = raw["permission_mode"] as? String ?? "default"
     let tool = raw["tool_name"] as? String ?? ""
+    // Headless sessions (`claude -p`, Agent SDK) set CLAUDE_CODE_ENTRYPOINT=sdk-cli.
+    // There is no terminal prompt to relocate there, and --allowedTools pre-approval
+    // leaves permission_mode at "default" — gating would invent an approval the session
+    // never had and stall it 55s per call. NOTCH_GATE_HEADLESS=1 opts back in.
+    let headless = ProcessInfo.processInfo.environment["CLAUDE_CODE_ENTRYPOINT"] == "sdk-cli"
+        && cfg("NOTCH_GATE_HEADLESS", "0") != "1"
     let skip = remoteApprove == "0"
+        || headless
         || (tool != "AskUserQuestion" && ["bypassPermissions", "auto", "dontAsk"].contains(pm))
         || (pm == "acceptEdits" && ["Edit", "Write", "MultiEdit"].contains(tool))
     if skip {
