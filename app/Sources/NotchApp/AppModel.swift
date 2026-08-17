@@ -633,11 +633,14 @@ final class AppModel: ObservableObject {
             decidedPermissions.removeValue(forKey: id)
         }
         for (key, var s) in sessions {
-            if s.state.needsUser || s.state == .working, s.updatedAt < now - staleAfterMs {
+            // .needsAttention never goes stale: it's an unacknowledged alert ("Finished —
+            // your turn", a question) and stale rows are hidden, so sweeping it would
+            // silently erase the alert. It ages out via retention below, like .done.
+            if s.state == .working || s.state == .needsPermission, s.updatedAt < now - staleAfterMs {
                 s.state = .stale
                 s.updatedAt = now
                 sessions[key] = s
-            } else if !(s.state.needsUser || s.state == .working), s.updatedAt < now - retainFinishedMs {
+            } else if s.state != .working, s.state != .needsPermission, s.updatedAt < now - retainFinishedMs {
                 sessions.removeValue(forKey: key)
                 sessionPendingIds.removeValue(forKey: key)
             }

@@ -67,6 +67,38 @@ describe('usage reporting', () => {
   })
 })
 
+describe('sweepStale', () => {
+  it('marks silent working sessions stale but never needs_attention (unacknowledged alerts)', () => {
+    const store = new Store(mkdtempSync(path.join(tmpdir(), 'notch-test-')))
+    store.handleEvent({ machine: 'vm', event: { session_id: 'busy', hook_event_name: 'SessionStart' } })
+    store.handleEvent({ machine: 'vm', event: { session_id: 'alert', hook_event_name: 'SessionStart' } })
+    store.handleEvent({
+      machine: 'vm',
+      event: { session_id: 'alert', hook_event_name: 'Notification', message: 'Claude needs your permission to use Bash' },
+    })
+    const past = Date.now() - 46 * 60 * 1000
+    store.sessions.get('vm:busy')!.updatedAt = past
+    store.sessions.get('vm:alert')!.updatedAt = past
+
+    store.sweepStale()
+    expect(store.sessions.get('vm:busy')?.state).toBe('stale')
+    expect(store.sessions.get('vm:alert')?.state).toBe('needs_attention')
+  })
+
+  it('prunes needs_attention via retention like done, so rows still clean up eventually', () => {
+    const store = new Store(mkdtempSync(path.join(tmpdir(), 'notch-test-')))
+    store.handleEvent({ machine: 'vm', event: { session_id: 'alert', hook_event_name: 'SessionStart' } })
+    store.handleEvent({
+      machine: 'vm',
+      event: { session_id: 'alert', hook_event_name: 'Notification', message: 'Claude needs your permission to use Bash' },
+    })
+    store.sessions.get('vm:alert')!.updatedAt = Date.now() - 7 * 60 * 60 * 1000
+
+    store.sweepStale()
+    expect(store.sessions.has('vm:alert')).toBe(false)
+  })
+})
+
 describe('redact', () => {
   it('keeps only metadata, never prompt/command/file content', () => {
     const envelope = {

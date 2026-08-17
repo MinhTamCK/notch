@@ -101,7 +101,11 @@ const RETAIN_FINISHED_MS = (Number(process.env.NOTCH_RETAIN_HOURS) || 6) * 60 * 
 // Hooks long-poll for 55s; anything older than this was abandoned (hook died
 // before polling) and would otherwise leave a stuck approval card.
 const PERMISSION_EXPIRY_MS = 90 * 1000
-const ACTIVE_STATES: SessionState[] = ['working', 'needs_permission', 'needs_attention']
+// States the stale sweep may reclaim: silence there means the process died (orphan).
+// 'needs_attention' is deliberately excluded — it's an unacknowledged alert and stale
+// rows are hidden, so sweeping it would silently erase the alert. It ages out via
+// the retention prune instead, like 'done'.
+const STALE_ELIGIBLE: SessionState[] = ['working', 'needs_permission']
 
 function trunc(s: unknown, n: number): string | undefined {
   if (typeof s !== 'string' || s.length === 0) return undefined
@@ -379,7 +383,7 @@ export class Store {
 
     const cutoff = Date.now() - STALE_AFTER_MS
     for (const s of this.sessions.values()) {
-      if (ACTIVE_STATES.includes(s.state) && s.updatedAt < cutoff) {
+      if (STALE_ELIGIBLE.includes(s.state) && s.updatedAt < cutoff) {
         s.state = 'stale'
         s.updatedAt = Date.now()
         this.emit({ type: 'session', session: s })
@@ -388,7 +392,7 @@ export class Store {
     // Prune finished sessions so they don't accumulate forever.
     const retainCutoff = Date.now() - RETAIN_FINISHED_MS
     for (const [key, s] of this.sessions) {
-      if (!ACTIVE_STATES.includes(s.state) && s.updatedAt < retainCutoff) {
+      if (!STALE_ELIGIBLE.includes(s.state) && s.updatedAt < retainCutoff) {
         this.sessions.delete(key)
         this.emit({ type: 'session_removed', key })
       }
