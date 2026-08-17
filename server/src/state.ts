@@ -96,7 +96,7 @@ export function cleanUsage(raw: unknown): UsageInfo | undefined {
 }
 
 // Configurable via ~/.notch/env: NOTCH_STALE_MINUTES / NOTCH_RETAIN_HOURS.
-const STALE_AFTER_MS = (Number(process.env.NOTCH_STALE_MINUTES) || 15) * 60 * 1000
+const STALE_AFTER_MS = (Number(process.env.NOTCH_STALE_MINUTES) || 45) * 60 * 1000
 const RETAIN_FINISHED_MS = (Number(process.env.NOTCH_RETAIN_HOURS) || 6) * 60 * 60 * 1000
 // Hooks long-poll for 55s; anything older than this was abandoned (hook died
 // before polling) and would otherwise leave a stuck approval card.

@@ -62,9 +62,13 @@ final class AppModel: ObservableObject {
 
     // MARK: Derived state
 
+    /// `.stale` is hidden as well as `.ended`: a session that has gone silent past
+    /// the stale window is almost always an orphan (its process died without firing
+    /// SessionEnd — a killed headless phase, a dropped VM), and leaving the row up
+    /// for `retainHours` reads as "still running". A late event brings it straight back.
     var visibleSessions: [Session] {
         sessions.values
-            .filter { $0.state != .ended }
+            .filter { $0.state != .ended && $0.state != .stale }
             .sorted { $0.updatedAt > $1.updatedAt }
     }
 
@@ -105,7 +109,10 @@ final class AppModel: ObservableObject {
             server: values["NOTCH_SERVER"] ?? "http://localhost:4519",
             machineToken: machine,
             operatorToken: values["NOTCH_OPERATOR_TOKEN"] ?? machine,
-            staleMinutes: Double(values["NOTCH_STALE_MINUTES"] ?? "") ?? 15,
+            // 45, not 15: a session is hidden once stale, so the window has to clear
+            // the longest plausible gap between two hook events — one foreground Bash
+            // call (a slice, a render, a long build) — or live work would vanish.
+            staleMinutes: Double(values["NOTCH_STALE_MINUTES"] ?? "") ?? 45,
             retainHours: Double(values["NOTCH_RETAIN_HOURS"] ?? "") ?? 6
         )
     }
