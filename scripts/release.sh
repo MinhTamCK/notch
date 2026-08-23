@@ -34,15 +34,16 @@ if [[ "$SIGNATURE" == *"Developer ID Application"* ]]; then
   echo "notarized and stapled"
 fi
 
-NOTES="Remote Claude Code monitor in your Mac's notch — live session status across machines, remote Approve/Deny with diff previews, plan review, question pickers, plan-usage bars and system stats.
+NOTES="Remote Claude Code, Codex and Cursor monitor in your Mac's notch — live session status across machines, remote Approve/Deny with diff previews, plan review, question pickers, plan-usage bars and system stats.
 
 **Requirements:** macOS 14+, Apple Silicon or Intel (universal binary). Signed and notarized by Apple — just drag and open.
 
 **Install**
 1. Download \`Notch-v$VERSION.zip\`, unzip, drag \`Notch.app\` into /Applications
 2. Open it — the app hosts its own server, no config needed
-3. Gear icon in the notch panel → **Install** under \"Claude Code on this Mac\" so local sessions show up
+3. Gear icon in the notch panel → **Install** under \"Agents on this Mac\" so local sessions show up (wires Claude Code, plus Codex and Cursor when present)
 4. To watch a VM or another computer: gear → **Copy command** under \"Add remote machine\" (needs Tailscale), then paste that line into the remote shell
+5. Codex: the next time it starts it asks to trust the new hooks — pick **Trust all and continue** (or run \`/hooks\`)
 
 **Settings** (gear icon in the notch panel) — Launch at Login, keep awake with the lid closed, \"your turn\" alerts, reconnect. The speaker icon in the header toggles sound."
 
