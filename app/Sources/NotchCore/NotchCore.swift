@@ -98,3 +98,47 @@ public enum CursorTranslate {
         return event
     }
 }
+
+public enum PatchSummary {
+    public enum Op: String { case add = "Add", update = "Update", delete = "Delete" }
+
+    /// One file touched by a Codex `apply_patch` call.
+    public struct File: Equatable {
+        public let op: Op
+        public let path: String
+        public init(op: Op, path: String) { self.op = op; self.path = path }
+    }
+
+    /// Parses Codex's apply_patch envelope ("*** Begin Patch" … "*** End Patch") into
+    /// the touched files plus flat removed/added lines, so the notch can show a diff
+    /// card for it the same way it does for Claude Code's Edit/Write.
+    public static func parse(_ patch: String) -> (files: [File], removed: [String], added: [String]) {
+        var files: [File] = []
+        var removed: [String] = []
+        var added: [String] = []
+        for rawLine in patch.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = String(rawLine)
+            if line.hasPrefix("*** ") {
+                for op in [Op.add, .update, .delete] {
+                    let marker = "*** \(op.rawValue) File: "
+                    if line.hasPrefix(marker) {
+                        files.append(File(op: op, path: String(line.dropFirst(marker.count))))
+                    }
+                }
+            } else if line.hasPrefix("+") {
+                added.append(String(line.dropFirst()))
+            } else if line.hasPrefix("-") {
+                removed.append(String(line.dropFirst()))
+            }
+        }
+        return (files, removed, added)
+    }
+
+    /// "Update src/main.swift" / "Add README.md (+2 files)" — for session rows and logs.
+    public static func describe(_ patch: String) -> String? {
+        let files = parse(patch).files
+        guard let first = files.first else { return nil }
+        let more = files.count > 1 ? " (+\(files.count - 1) files)" : ""
+        return "\(first.op.rawValue) \(first.path)\(more)"
+    }
+}

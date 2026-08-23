@@ -122,6 +122,7 @@ struct AgentBadge: View {
         switch agent {
         case "claude-code", "claude": name = "agent-claude"
         case "cursor": name = "agent-cursor"
+        case "codex": name = "agent-codex"
         default: name = nil
         }
         guard let name else { return nil }
@@ -138,6 +139,8 @@ struct AgentBadge: View {
             return ("✳", Color(red: 0.85, green: 0.47, blue: 0.34))
         case "cursor":
             return ("▮", Color(white: 0.92))
+        case "codex":
+            return (">_", Color(white: 0.92))
         default:
             return ("👾", .purple)
         }
@@ -426,8 +429,8 @@ struct SettingsSection: View {
             }
 
             settingRow(
-                title: "Claude Code on this Mac",
-                subtitle: hooksInstalled ? "Hooks installed" : "Sessions on this Mac won't appear yet"
+                title: "Agents on this Mac",
+                subtitle: hooksInstalled ? "Hooks installed (Claude Code · Cursor · Codex)" : "Sessions on this Mac won't appear yet"
             ) {
                 Button(hooksInstalled ? "Reinstall" : "Install") {
                     try? LocalSetup.install()
@@ -620,8 +623,17 @@ struct PermissionCard: View {
 
     @ViewBuilder
     private var detailView: some View {
+        if let reason = request.approvalReason {
+            Text(reason)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
         if let diff = request.editDiff {
             DiffView(file: request.filePath, removed: diff.removed, added: diff.added)
+        } else if let patch = request.patchDiff {
+            DiffView(file: patch.file, removed: patch.removed, added: patch.added)
         } else if let content = request.writeContent {
             DiffView(file: request.filePath, removed: [], added: content)
         } else if request.isPlan, let plan = request.detail {

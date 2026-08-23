@@ -152,11 +152,21 @@ export function describeQuestion(input?: Record<string, unknown>): string | unde
   return trunc(opts.length ? `${q} · ${opts.slice(0, 4).join(' / ')}` : q, 300)
 }
 
+/** Codex apply_patch → "Update src/a.ts" / "Add README.md (+2 files)" (first file + count). */
+export function describePatch(patch: unknown): string | undefined {
+  if (typeof patch !== 'string') return undefined
+  const files = [...patch.matchAll(/^\*\*\* (Add|Update|Delete) File: (.+)$/gm)]
+  if (files.length === 0) return undefined
+  const more = files.length > 1 ? ` (+${files.length - 1} files)` : ''
+  return `${files[0][1]} ${files[0][2]}${more}`
+}
+
 function describeTool(name: string, input?: Record<string, unknown>): string {
   if (name === 'Bash') return trunc(`$ ${input?.command ?? ''}`, 120) ?? name
   if (name === 'Write' || name === 'Edit' || name === 'MultiEdit')
     return trunc(`${name} ${input?.file_path ?? ''}`, 120) ?? name
   if (name === 'ExitPlanMode') return 'Plan ready for review'
+  if (name === 'apply_patch') return trunc(describePatch(input?.command), 120) ?? name
   return name
 }
 
@@ -267,6 +277,12 @@ export class Store {
       case 'PostToolUse':
         if (!this.hasPendingPermission(s)) s.state = 'working'
         if (env.event.tool_name) s.lastTool = describeTool(env.event.tool_name, env.event.tool_input)
+        break
+      case 'PermissionRequest':
+        // Codex is prompting in its terminal (monitor-only: NOTCH_REMOTE_APPROVE=0).
+        if (!this.hasPendingPermission(s)) s.state = 'needs_attention'
+        if (env.event.tool_name) s.lastTool = describeTool(env.event.tool_name, env.event.tool_input)
+        s.lastMessage = 'Needs approval in the terminal'
         break
       case 'Notification': {
         const msg = env.event.message ?? ''

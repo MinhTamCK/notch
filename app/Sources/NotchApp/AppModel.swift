@@ -442,6 +442,7 @@ final class AppModel: ObservableObject {
         case "Bash": return trunc("$ \(input?["command"]?.stringValue ?? "")", 120) ?? name
         case "Write", "Edit", "MultiEdit": return trunc("\(name) \(input?["file_path"]?.stringValue ?? "")", 120) ?? name
         case "ExitPlanMode": return "Plan ready for review"
+        case "apply_patch": return trunc(PatchSummary.describe(input?["command"]?.stringValue ?? ""), 120) ?? name
         default: return name
         }
     }
@@ -498,6 +499,11 @@ final class AppModel: ObservableObject {
         case "PreToolUse", "PostToolUse":
             if !hasPendingPermission(key) { s.state = .working }
             if let tool = env.event.tool_name { s.lastTool = describeTool(tool, env.event.tool_input) }
+        case "PermissionRequest":
+            // Codex is prompting in its terminal (monitor-only: NOTCH_REMOTE_APPROVE=0).
+            if !hasPendingPermission(key) { s.state = .needsAttention }
+            if let tool = env.event.tool_name { s.lastTool = describeTool(tool, env.event.tool_input) }
+            s.lastMessage = "Needs approval in the terminal"
         case "Notification":
             let msg = env.event.message ?? ""
             // "waiting for your input" is the idle "your turn" ping. Treat it as an

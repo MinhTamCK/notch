@@ -4,13 +4,19 @@ enum EmbeddedScripts {
     /// Served at GET /install/hook — the bash hook remote machines run (needs curl + jq).
     static let hookScript = #"""
     #!/usr/bin/env bash
-    # Notch hook for Claude Code (installed via the Notch app's /install endpoint).
-    #   notch-hook.sh event       — fire-and-forget: report the hook event to the server
-    #   notch-hook.sh permission  — PreToolUse: ask the server for an allow/deny decision
-    # Fails open in every path so Claude Code falls back to its terminal flow.
+    # Notch hook for Claude Code and Codex (installed via the Notch app's /install endpoint).
+    #   notch-hook.sh event             — fire-and-forget: report the hook event to the server
+    #   notch-hook.sh permission        — PreToolUse: ask the server for an allow/deny decision
+    #   notch-hook.sh codex-event       — same as event, tagged as a Codex session
+    #   notch-hook.sh codex-permission  — Codex PermissionRequest: allow/deny via the notch
+    # Fails open in every path so the agent falls back to its terminal flow.
     set -u
 
     MODE="${1:-event}"
+    AGENT="claude-code"
+    case "$MODE" in
+      codex-*) AGENT="codex"; MODE="${MODE#codex-}" ;;
+    esac
     # Caller-provided env wins over ~/.notch/env (matches the compiled notch-hook).
     _ns="${NOTCH_SERVER-}"; _nt="${NOTCH_TOKEN-}"; _nm="${NOTCH_MACHINE-}"; _nr="${NOTCH_REMOTE_APPROVE-}"
     _nh="${NOTCH_GATE_HEADLESS-}"
@@ -30,7 +36,7 @@ enum EmbeddedScripts {
     command -v jq >/dev/null 2>&1 || exit 0
     command -v curl >/dev/null 2>&1 || exit 0
 
-    body="$(jq -cn --arg machine "$NOTCH_MACHINE" --arg agent "claude-code" --argjson event "$payload" \
+    body="$(jq -cn --arg machine "$NOTCH_MACHINE" --arg agent "$AGENT" --argjson event "$payload" \
       '{machine: $machine, agent: $agent, ts: (now * 1000 | floor), event: $event}' 2>/dev/null)" || exit 0
 
     auth=(-H "Authorization: Bearer $NOTCH_TOKEN" -H "Content-Type: application/json")
@@ -63,10 +69,11 @@ enum EmbeddedScripts {
     # Respect the session's permission mode: only gate tools Claude Code itself would
     # prompt for. Bypass/auto/dontAsk sessions are monitor-only; acceptEdits skips
     # the gate for edit tools but still gates Bash and plans. AskUserQuestion
-    # prompts in every mode, so it's always gated.
-    if [ "$MODE" = "permission" ]; then
+    # prompts in every mode, so it's always gated. (Codex's PermissionRequest only
+    # fires when Codex would prompt anyway, so none of this applies there.)
+    tool="$(jq -r '.tool_name // ""' <<<"$payload" 2>/dev/null)"
+    if [ "$MODE" = "permission" ] && [ "$AGENT" = "claude-code" ]; then
       pm="$(jq -r '.permission_mode // "default"' <<<"$payload" 2>/dev/null)"
-      tool="$(jq -r '.tool_name // ""' <<<"$payload" 2>/dev/null)"
       case "$pm" in
         bypassPermissions|auto|dontAsk) [ "$tool" = "AskUserQuestion" ] || MODE="event" ;;
         acceptEdits) case "$tool" in Edit|Write|MultiEdit) MODE="event" ;; esac ;;
@@ -104,8 +111,13 @@ enum EmbeddedScripts {
         exit 0
       fi
 
-      case "$decision" in
-        allow|deny)
+      case "$AGENT:$decision" in
+        codex:allow)
+          echo '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}' ;;
+        codex:deny)
+          jq -cn --arg r "$reason" \
+            '{hookSpecificOutput: {hookEventName: "PermissionRequest", decision: {behavior: "deny", message: $r}}}' ;;
+        claude-code:allow|claude-code:deny)
           jq -cn --arg d "$decision" --arg r "$reason" \
             '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: $d, permissionDecisionReason: $r}}'
           ;;
@@ -187,6 +199,27 @@ enum EmbeddedScripts {
       | .statusLine              = {type: "command", command: $sl}
     ' "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
 
-    echo "done — new Claude Code sessions on this machine report to __SERVER__"
+    # Codex (OpenAI) reads ~/.codex/hooks.json — same shape as Claude Code's hooks.
+    # Approval goes through its PermissionRequest event (only fires when Codex would prompt).
+    if command -v codex >/dev/null 2>&1 || [ -d "$HOME/.codex" ]; then
+      mkdir -p "$HOME/.codex"
+      CODEX_HOOKS="$HOME/.codex/hooks.json"
+      [ -f "$CODEX_HOOKS" ] || echo '{}' > "$CODEX_HOOKS"
+      cp "$CODEX_HOOKS" "$CODEX_HOOKS.notch-backup"
+      jq --arg ev '"$HOME/.notch/notch-hook.sh" codex-event' --arg perm '"$HOME/.notch/notch-hook.sh" codex-permission' '
+        def strip: map(select(((.hooks // []) | any(.command // "" | contains("notch-hook"))) | not));
+        .hooks = (.hooks // {})
+        | .hooks.SessionStart      = (((.hooks.SessionStart // [])      | strip) + [{hooks: [{type: "command", command: $ev}]}])
+        | .hooks.UserPromptSubmit  = (((.hooks.UserPromptSubmit // [])  | strip) + [{hooks: [{type: "command", command: $ev}]}])
+        | .hooks.PostToolUse       = (((.hooks.PostToolUse // [])       | strip) + [{hooks: [{type: "command", command: $ev}]}])
+        | .hooks.Stop              = (((.hooks.Stop // [])              | strip) + [{hooks: [{type: "command", command: $ev}]}])
+        | .hooks.SessionEnd        = (((.hooks.SessionEnd // [])        | strip) + [{hooks: [{type: "command", command: $ev, timeout: 3}]}])
+        | .hooks.PermissionRequest = (((.hooks.PermissionRequest // []) | strip) + [{hooks: [{type: "command", command: $perm, timeout: 60, statusMessage: "Waiting for Notch approval"}]}])
+      ' "$CODEX_HOOKS" > "$CODEX_HOOKS.tmp" && mv "$CODEX_HOOKS.tmp" "$CODEX_HOOKS"
+      echo "hooks merged into $CODEX_HOOKS (backup at $CODEX_HOOKS.notch-backup)"
+      echo "Codex: on its next start pick \"Trust all and continue\" when it asks about new hooks (or run /hooks)"
+    fi
+
+    echo "done — new Claude Code / Codex sessions on this machine report to __SERVER__"
     """#
 }

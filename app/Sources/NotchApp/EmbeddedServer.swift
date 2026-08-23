@@ -297,6 +297,60 @@ enum LocalSetup {
         if command.contains("notch-hook\"") {
             try? installCursorHooks()
         }
+        // Codex reads ~/.codex/hooks.json (same shape as Claude's). Both hook
+        // flavors speak it, so this works in dev builds too.
+        try? installCodexHooks(command: command)
+    }
+
+    /// Merge Notch entries into ~/.codex/hooks.json (only if Codex is present).
+    /// Approval rides on Codex's PermissionRequest event, which only fires when
+    /// Codex itself would prompt. Codex asks the user to trust new hooks on its
+    /// next start — by design, we don't pre-trust them from here.
+    private static func installCodexHooks(command: String) throws {
+        let fm = FileManager.default
+        let codexDir = fm.homeDirectoryForCurrentUser.appendingPathComponent(".codex")
+        guard fm.fileExists(atPath: codexDir.path) else { return }
+        let hooksURL = codexDir.appendingPathComponent("hooks.json")
+
+        // Fail closed like the Claude settings path: back up raw bytes and refuse to
+        // overwrite an existing hooks.json we can't parse (would lose the user's hooks).
+        var root: [String: Any] = [:]
+        if let data = try? Data(contentsOf: hooksURL) {
+            try data.write(to: hooksURL.appendingPathExtension("notch-backup"))
+            guard let parsed = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+                throw NSError(domain: "notch", code: 4, userInfo: [
+                    NSLocalizedDescriptionKey: "~/.codex/hooks.json is not valid JSON; left untouched (backup written)"
+                ])
+            }
+            root = parsed
+        }
+        var hooks = root["hooks"] as? [String: Any] ?? [:]
+
+        func entry(mode: String, timeout: Int? = nil, status: String? = nil) -> [String: Any] {
+            var hook: [String: Any] = ["type": "command", "command": "\(command) \(mode)"]
+            if let timeout { hook["timeout"] = timeout }
+            if let status { hook["statusMessage"] = status }
+            return ["hooks": [hook]]
+        }
+
+        func stripped(_ value: Any?) -> [[String: Any]] {
+            ((value as? [[String: Any]]) ?? []).filter { existing in
+                let inner = existing["hooks"] as? [[String: Any]] ?? []
+                return !inner.contains { (($0["command"] as? String) ?? "").contains("notch-hook") }
+            }
+        }
+
+        for event in ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop"] {
+            hooks[event] = stripped(hooks[event]) + [entry(mode: "codex-event")]
+        }
+        // SessionEnd hooks are capped at 3s by Codex.
+        hooks["SessionEnd"] = stripped(hooks["SessionEnd"]) + [entry(mode: "codex-event", timeout: 3)]
+        hooks["PermissionRequest"] = stripped(hooks["PermissionRequest"])
+            + [entry(mode: "codex-permission", timeout: 60, status: "Waiting for Notch approval")]
+
+        root["hooks"] = hooks
+        let output = try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
+        try output.write(to: hooksURL)
     }
 
     /// Merge Notch entries into ~/.cursor/hooks.json (only if Cursor is present).

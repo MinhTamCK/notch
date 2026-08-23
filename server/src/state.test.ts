@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { Store, redact, describeQuestion, cleanUsage } from './state.js'
+import { Store, redact, describeQuestion, describePatch, cleanUsage } from './state.js'
 
 describe('describeQuestion', () => {
   it('summarizes the question with its option labels', () => {
@@ -133,5 +133,64 @@ describe('redact', () => {
   it('passes through non-object input unchanged', () => {
     expect(redact(null)).toBe(null)
     expect(redact('x')).toBe('x')
+  })
+})
+
+describe('Codex sessions', () => {
+  const patch = [
+    '*** Begin Patch',
+    '*** Update File: src/main.ts',
+    '@@',
+    '-const a = 1',
+    '+const a = 2',
+    '*** Add File: docs/NEW.md',
+    '+# New',
+    '*** End Patch',
+  ].join('\n')
+
+  it('describes apply_patch by its first file and file count', () => {
+    expect(describePatch(patch)).toBe('Update src/main.ts (+1 files)')
+    expect(describePatch('*** Begin Patch\n*** Delete File: old.txt\n*** End Patch')).toBe('Delete old.txt')
+    expect(describePatch('not a patch')).toBeUndefined()
+    expect(describePatch(undefined)).toBeUndefined()
+  })
+
+  it('keeps the codex agent tag and shows the patch on the session row', () => {
+    const store = new Store(mkdtempSync(path.join(tmpdir(), 'notch-test-')))
+    store.handleEvent({
+      machine: 'vm',
+      agent: 'codex',
+      event: { session_id: 'c1', hook_event_name: 'SessionStart', cwd: '/w' },
+    })
+    const s = store.handleEvent({
+      machine: 'vm',
+      agent: 'codex',
+      event: {
+        session_id: 'c1',
+        hook_event_name: 'PostToolUse',
+        tool_name: 'apply_patch',
+        tool_input: { command: patch },
+      },
+    })!
+    expect(s.agent).toBe('codex')
+    expect(s.state).toBe('working')
+    expect(s.lastTool).toBe('Update src/main.ts (+1 files)')
+  })
+
+  it('raises attention for a monitor-only PermissionRequest', () => {
+    const store = new Store(mkdtempSync(path.join(tmpdir(), 'notch-test-')))
+    store.handleEvent({ machine: 'vm', agent: 'codex', event: { session_id: 'c2', hook_event_name: 'SessionStart' } })
+    const s = store.handleEvent({
+      machine: 'vm',
+      agent: 'codex',
+      event: {
+        session_id: 'c2',
+        hook_event_name: 'PermissionRequest',
+        tool_name: 'Bash',
+        tool_input: { command: 'touch /root/x', description: 'Allow writing outside the workspace?' },
+      },
+    })!
+    expect(s.state).toBe('needs_attention')
+    expect(s.lastTool).toBe('$ touch /root/x')
   })
 })

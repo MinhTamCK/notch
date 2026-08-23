@@ -10,7 +10,7 @@ sessions running on many VMs / other computers, via a central server.
 | Interaction | Monitor + remote approve |
 | Mac app form | Notch app, native Swift/SwiftUI |
 | VM reporting | Claude Code hooks push events (no daemon) |
-| Agents (v1) | Claude Code only (schema stays agent-agnostic for Cursor later) |
+| Agents (v1) | Claude Code only (schema stays agent-agnostic for Cursor later). Cursor landed in v0.3, Codex in v0.8 (see below) |
 | Notch UI | [DynamicNotchKit](https://github.com/MrKai77/DynamicNotchKit) (MIT) — handles notch panel + non-notch Macs |
 | Assets | SF Symbols for in-app icons; own app icon (SVG → iconutil); Kenney CC0 packs for 8-bit sounds |
 
@@ -123,6 +123,18 @@ blocks it with the reason shown to Claude; server-down → terminal prompt fallb
 Multi-machine grouping, stale-session cleanup, reconnect logic (app↔server), launch at
 login, signed build, install.sh ergonomics.
 ✅ Done when: running it for a real day across all VMs without restarting anything.
+
+### Codex (v0.8)
+
+Codex ≥ 0.148 ships Claude-Code-shaped hooks (`~/.codex/hooks.json`, same event names and
+stdin fields). Notch registers `SessionStart/UserPromptSubmit/PostToolUse/Stop/SessionEnd`
+as `codex-event` and `PermissionRequest` as `codex-permission`. `PermissionRequest` only
+fires when Codex would prompt (sandbox escalation, network, etc.), so there is no
+permission-mode heuristic; the hook answers
+`{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"|"deny"}}}`
+or stays silent on timeout → Codex's own prompt. `apply_patch` requests render as a diff.
+Codex requires the user to trust new hooks once ("Trust all and continue" at startup);
+the installers deliberately don't pre-trust them.
 
 ## Out of scope (v1)
 

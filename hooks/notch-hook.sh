@@ -1,13 +1,20 @@
 #!/usr/bin/env bash
-# Notch hook for Claude Code. Registered in ~/.claude/settings.json by install.sh.
-#   notch-hook.sh event       — fire-and-forget: report the hook event to the server
-#   notch-hook.sh permission  — PreToolUse: ask the server for an allow/deny decision
+# Notch hook for Claude Code and Codex. Registered by install.sh in
+# ~/.claude/settings.json (Claude Code) and ~/.codex/hooks.json (Codex).
+#   notch-hook.sh event             — fire-and-forget: report the hook event to the server
+#   notch-hook.sh permission        — PreToolUse: ask the server for an allow/deny decision
+#   notch-hook.sh codex-event       — same as event, tagged as a Codex session
+#   notch-hook.sh codex-permission  — Codex PermissionRequest: allow/deny via the notch
 #
 # Fails open in every path: if the server, curl, or jq is unavailable, exit 0 with no
-# output so Claude Code falls back to its normal (terminal) permission flow.
+# output so the agent falls back to its normal (terminal) permission flow.
 set -u
 
 MODE="${1:-event}"
+AGENT="claude-code"
+case "$MODE" in
+  codex-*) AGENT="codex"; MODE="${MODE#codex-}" ;;
+esac
 # Caller-provided env wins over ~/.notch/env (matches the compiled notch-hook).
 _ns="${NOTCH_SERVER-}"; _nt="${NOTCH_TOKEN-}"; _nm="${NOTCH_MACHINE-}"; _nr="${NOTCH_REMOTE_APPROVE-}"
 _nh="${NOTCH_GATE_HEADLESS-}"
@@ -27,15 +34,16 @@ payload="$(cat)" || exit 0
 command -v jq >/dev/null 2>&1 || exit 0
 command -v curl >/dev/null 2>&1 || exit 0
 
-body="$(jq -cn --arg machine "$NOTCH_MACHINE" --arg agent "claude-code" --argjson event "$payload" \
+body="$(jq -cn --arg machine "$NOTCH_MACHINE" --arg agent "$AGENT" --argjson event "$payload" \
   '{machine: $machine, agent: $agent, ts: (now * 1000 | floor), event: $event}' 2>/dev/null)" || exit 0
 
 auth=(-H "Authorization: Bearer $NOTCH_TOKEN" -H "Content-Type: application/json")
 
 # Respect the session's permission mode: only gate tools Claude Code itself would
 # prompt for. Bypass/auto/dontAsk sessions are monitor-only; acceptEdits skips
-# the gate for edit tools but still gates Bash and plans.
-if [ "$MODE" = "permission" ]; then
+# the gate for edit tools but still gates Bash and plans. (Codex's PermissionRequest
+# only fires when Codex would prompt anyway, so none of this applies there.)
+if [ "$MODE" = "permission" ] && [ "$AGENT" = "claude-code" ]; then
   pm="$(jq -r '.permission_mode // "default"' <<<"$payload" 2>/dev/null)"
   tool="$(jq -r '.tool_name // ""' <<<"$payload" 2>/dev/null)"
   case "$pm" in
@@ -64,8 +72,13 @@ if [ "$MODE" = "permission" ] && [ "$NOTCH_REMOTE_APPROVE" != "0" ]; then
   decision="$(jq -r '.decision // empty' <<<"$dec" 2>/dev/null)"
   reason="$(jq -r '.reason // "Decided via Notch"' <<<"$dec" 2>/dev/null)"
 
-  case "$decision" in
-    allow|deny)
+  case "$AGENT:$decision" in
+    codex:allow)
+      echo '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}' ;;
+    codex:deny)
+      jq -cn --arg r "$reason" \
+        '{hookSpecificOutput: {hookEventName: "PermissionRequest", decision: {behavior: "deny", message: $r}}}' ;;
+    claude-code:allow|claude-code:deny)
       jq -cn --arg d "$decision" --arg r "$reason" \
         '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: $d, permissionDecisionReason: $r}}'
       ;;

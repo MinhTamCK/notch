@@ -1,6 +1,6 @@
 # Notch
 
-Monitor **and remotely approve** your Claude Code and Cursor sessions from your Mac's notch — across every machine you run agents on.
+Monitor **and remotely approve** your Claude Code, Codex and Cursor sessions from your Mac's notch — across every machine you run agents on.
 
 🌐 **[codepi.xyz/notch](https://codepi.xyz/notch)** · 🎬 **[Watch the demo](https://codepi.xyz/assets/media/notch-demo.mp4)** · 📦 **[Download](https://github.com/MinhTamCK/notch/releases/latest)**
 
@@ -8,7 +8,7 @@ Monitor **and remotely approve** your Claude Code and Cursor sessions from your 
 
 ## What it does
 
-- **See every session at a glance** — live status (working · waiting · done) of all your Claude Code and Cursor agents, right in the MacBook notch.
+- **See every session at a glance** — live status (working · waiting · done) of all your Claude Code, Codex and Cursor agents, right in the MacBook notch.
 - **Approve from the notch** — permission requests pop up with an inline diff (for edits), the command (for shell), or a Markdown plan preview. Hit **Allow** or **Deny** without leaving what you're doing.
 - **Alerts that matter** — sound + auto-expand when a session needs you; opt-in "your turn" ping when a turn finishes.
 - **Keep running with the lid closed** — one toggle stops the Mac sleeping on lid-close, on battery or plugged in, so sessions keep going while the screen is locked.
@@ -22,6 +22,7 @@ Monitor **and remotely approve** your Claude Code and Cursor sessions from your 
    │
    │    Claude Code ─┐
    │     (hooks)     ├──►  notch-hook  —  reports events, asks for approval
+   │    Codex ───────┤
    │    Cursor ──────┘
    │
    │    HTTP over Tailscale   (loopback + 100.64.0.0/10 only)
@@ -57,6 +58,8 @@ Because hooks **fail open**, Notch being down never freezes an agent — the wor
 2. **Open it.** It hosts its own server and generates its own tokens — nothing to configure.
 3. Click the **⚙️ gear** in the notch panel → **Enable Claude Code on This Mac**. New sessions now show up in your notch.
 4. To watch a VM or another computer: gear → **Add Remote Machine (Copy Command)**, then paste that one line into the remote shell (needs `curl` + `jq`, and Tailscale reach to your Mac).
+
+Both installers also wire up **Codex** (`~/.codex/hooks.json`) and **Cursor** when they're present. Codex asks you to trust new hooks the next time it starts — pick **Trust all and continue** (or run `/hooks`). Codex approvals ride on its `PermissionRequest` hook, so the notch only gets asked when Codex itself would have prompted.
 
 **Requirements:** macOS 14+ · Apple Silicon or Intel (universal) · [Tailscale](https://tailscale.com/download) for remote machines.
 

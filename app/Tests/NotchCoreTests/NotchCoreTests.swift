@@ -108,3 +108,37 @@ struct CursorTranslateTests {
         #expect(input?["new_string"] as? String == "b")
     }
 }
+
+@Suite("PatchSummary — Codex apply_patch")
+struct PatchSummaryTests {
+    let patch = """
+    *** Begin Patch
+    *** Update File: src/main.swift
+    @@ func run() {
+     let a = 1
+    -let b = 2
+    +let b = 3
+    +let c = 4
+    *** Add File: docs/NEW.md
+    +# New
+    *** Delete File: old.txt
+    *** End Patch
+    """
+
+    @Test func extractsFilesAndLines() {
+        let result = PatchSummary.parse(patch)
+        #expect(result.files == [
+            .init(op: .update, path: "src/main.swift"),
+            .init(op: .add, path: "docs/NEW.md"),
+            .init(op: .delete, path: "old.txt"),
+        ])
+        #expect(result.removed == ["let b = 2"])
+        #expect(result.added == ["let b = 3", "let c = 4", "# New"])
+    }
+
+    @Test func describesFirstFileAndCount() {
+        #expect(PatchSummary.describe(patch) == "Update src/main.swift (+2 files)")
+        #expect(PatchSummary.describe("*** Begin Patch\n*** Add File: a.txt\n+hi\n*** End Patch") == "Add a.txt")
+        #expect(PatchSummary.describe("not a patch") == nil)
+    }
+}

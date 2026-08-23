@@ -1,4 +1,5 @@
 import Foundation
+import NotchCore
 
 enum SessionState: String, Codable {
     case working
@@ -104,14 +105,31 @@ struct PermissionRequest: Codable, Identifiable, Equatable {
     /// The main thing to show the user: the command, file path, or plan text.
     var detail: String? {
         switch toolName {
-        case "Bash": return toolInput?["command"]?.stringValue
+        case "Bash", "apply_patch": return toolInput?["command"]?.stringValue
         case "Write", "Edit", "MultiEdit": return toolInput?["file_path"]?.stringValue
         case "ExitPlanMode": return toolInput?["plan"]?.stringValue
         default: return nil
         }
     }
 
+    /// Why the agent is asking — Codex attaches a human-readable reason to escalation
+    /// requests ("…outside the writable workspace?"); Claude's Bash carries its own
+    /// one-line description of the command.
+    var approvalReason: String? {
+        toolName == "Bash" ? toolInput?["description"]?.stringValue : nil
+    }
+
     var filePath: String? { toolInput?["file_path"]?.stringValue }
+
+    /// Codex apply_patch: the touched file(s) plus removed/added lines, rendered with
+    /// the same diff card as Edit/Write. Multi-file patches are flattened.
+    var patchDiff: (file: String, removed: [String], added: [String])? {
+        guard toolName == "apply_patch", let patch = toolInput?["command"]?.stringValue else { return nil }
+        let parsed = PatchSummary.parse(patch)
+        guard let first = parsed.files.first else { return nil }
+        let label = parsed.files.count > 1 ? "\(first.path) (+\(parsed.files.count - 1) files)" : first.path
+        return (label, parsed.removed, parsed.added)
+    }
 
     /// Old/new lines for Edit requests, so the card can render a real diff.
     var editDiff: (removed: [String], added: [String])? {

@@ -4,7 +4,9 @@
 //   notch-hook statusline    — Claude Code statusline: report plan usage, render text
 //   notch-hook cursor-event  — Cursor: translate + report event
 //   notch-hook cursor-shell  — Cursor beforeShellExecution: allow/deny/ask gate
-// Fails safe on every path: Claude Code falls back to its terminal prompt;
+//   notch-hook codex-event   — Codex: report event (same schema as Claude Code)
+//   notch-hook codex-permission — Codex PermissionRequest: allow/deny gate (long-poll)
+// Fails safe on every path: Claude Code and Codex fall back to their terminal prompt;
 // Cursor gets an explicit {"permission":"ask"} (it fails OPEN otherwise).
 import Foundation
 import NotchCore
@@ -33,6 +35,7 @@ let token = cfg("NOTCH_TOKEN", "")
 let machine = cfg("NOTCH_MACHINE", String(ProcessInfo.processInfo.hostName.split(separator: ".").first ?? "mac"))
 let remoteApprove = cfg("NOTCH_REMOTE_APPROVE", "1")
 let isCursor = mode.hasPrefix("cursor")
+let isCodex = mode.hasPrefix("codex")
 
 func emit(_ object: [String: Any]) {
     if let data = try? JSONSerialization.data(withJSONObject: object) {
@@ -91,7 +94,7 @@ let event = isCursor ? translateCursor(raw) : raw
 
 let envelope: [String: Any] = [
     "machine": machine,
-    "agent": isCursor ? "cursor" : "claude-code",
+    "agent": isCursor ? "cursor" : isCodex ? "codex" : "claude-code",
     "ts": Int(Date().timeIntervalSince1970 * 1000),
     "event": event,
 ]
@@ -206,7 +209,20 @@ case "cursor-shell":
         emit(["permission": "ask"])
     }
 
-default: // event, cursor-event
+case "codex-permission":
+    // Codex only fires PermissionRequest when it would prompt anyway, so there is
+    // no permission-mode dance here. No decision → stay silent → Codex's own prompt.
+    if remoteApprove == "0" {
+        _ = request("POST", "/api/events", body: envelope, timeout: 2)
+        exit(0)
+    }
+    guard let (decision, reason, _) = gate() else { exit(0) }
+    let verdict: [String: Any] = decision == "allow"
+        ? ["behavior": "allow"]
+        : ["behavior": "deny", "message": reason]
+    emit(["hookSpecificOutput": ["hookEventName": "PermissionRequest", "decision": verdict]])
+
+default: // event, cursor-event, codex-event
     _ = request("POST", "/api/events", body: envelope, timeout: 2)
 }
 exit(0)
