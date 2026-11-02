@@ -10,7 +10,10 @@ DIST="$ROOT/app/dist"
 BUNDLE="$DIST/Notch.app"
 
 (cd "$ROOT/app" && swift build -c release --arch arm64 --arch x86_64)
-BIN="$ROOT/app/.build/apple/Products/Release/NotchApp"
+# Ask SwiftPM where the universal products went — newer toolchains moved them
+# from .build/apple to .build/out, and a stale copy would get bundled silently.
+BIN_DIR="$(cd "$ROOT/app" && swift build -c release --arch arm64 --arch x86_64 --show-bin-path)"
+BIN="$BIN_DIR/NotchApp"
 mkdir -p "$DIST"
 
 if [ ! -f "$DIST/AppIcon.icns" ]; then
@@ -21,7 +24,7 @@ fi
 rm -rf "$BUNDLE"
 mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources"
 cp "$BIN" "$BUNDLE/Contents/MacOS/NotchApp"
-cp "$ROOT/app/.build/apple/Products/Release/notch-hook" "$BUNDLE/Contents/Resources/notch-hook"
+cp "$BIN_DIR/notch-hook" "$BUNDLE/Contents/Resources/notch-hook"
 cp "$ROOT/app/Assets/"*.png "$BUNDLE/Contents/Resources/"
 cp "$DIST/AppIcon.icns" "$BUNDLE/Contents/Resources/AppIcon.icns"
 
@@ -41,6 +44,12 @@ cat > "$BUNDLE/Contents/Info.plist" <<'EOF'
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
+  <!-- Client mode talks plain ws:// to the server in ~/.notch/env, usually a
+       tailnet IP (100.64/10). ATS refuses that, and its LocalNetworking
+       exception doesn't cover CGNAT IPs nor can exceptions name an IP.
+       WireGuard (Tailscale) already encrypts the link. -->
+  <key>NSAppTransportSecurity</key>
+  <dict><key>NSAllowsArbitraryLoads</key><true/></dict>
 </dict>
 </plist>
 EOF
