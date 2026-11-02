@@ -6,8 +6,12 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Store, type Decision } from './state.js'
 import { allowedSource, authorizeRole } from './net.js'
+import { serveStatic } from '@hono/node-server/serve-static'
 
 const PORT = Number(process.env.NOTCH_PORT ?? 4519)
+// Bind address. Set to the Tailscale IP on a host with other interfaces so the
+// port is not even open on LAN/public NICs (the source filter stays as 2nd layer).
+const HOST = process.env.NOTCH_HOST || undefined
 // Machine role: report events, open permission requests, poll own decision.
 const TOKEN = process.env.NOTCH_TOKEN ?? ''
 // Operator role: list sessions, open the dashboard WebSocket, decide permissions.
@@ -35,6 +39,11 @@ app.use('*', async (c, next) => {
 })
 
 app.get('/health', c => c.json({ ok: true }))
+
+// Web dashboard (static shell, no data inside). Data needs the operator token via
+// /api/sessions + /ws, so serving the page itself to the tailnet leaks nothing.
+app.use('/dashboard/*', serveStatic({ root: './public', rewriteRequestPath: p => p.replace(/^\/dashboard/, '') }))
+app.get('/dashboard', c => c.redirect('/dashboard/'))
 
 /** Bearer-token check for a given role. Operator implies machine rights. */
 function requireRole(role: 'machine' | 'operator') {
@@ -115,8 +124,8 @@ app.post('/api/permissions/:id/decide', requireRole('operator'), async c => {
   return c.json({ ok: true })
 })
 
-const server = serve({ fetch: app.fetch, port: PORT }, info => {
-  console.log(`[notch] server listening on :${info.port}`)
+const server = serve({ fetch: app.fetch, port: PORT, hostname: HOST }, info => {
+  console.log(`[notch] server listening on ${info.address}:${info.port}`)
 }) as Server
 
 const wss = new WebSocketServer({ noServer: true })
