@@ -1,34 +1,27 @@
 import AppKit
 import ServiceManagement
+import NotchCore
 import SwiftUI
 
-extension SessionState {
-    var icon: String {
-        switch self {
-        case .working: "hammer.fill"
-        case .needsPermission: "hand.raised.fill"
-        case .needsAttention: "bell.fill"
-        case .done: "checkmark.circle.fill"
-        case .ended: "xmark.circle"
-        case .stale: "moon.zzz.fill"
-        }
+extension Color {
+    init(hex: UInt32) {
+        self.init(red: Double((hex >> 16) & 0xFF) / 255,
+                  green: Double((hex >> 8) & 0xFF) / 255,
+                  blue: Double(hex & 0xFF) / 255)
     }
+}
 
-    var color: Color {
-        switch self {
-        case .working: .cyan
-        case .needsPermission: .orange
-        case .needsAttention: .yellow
-        case .done: .green
-        case .ended, .stale: .gray
-        }
-    }
+extension SessionState {
+    /// "The colour is the interface" — same palette as the web dashboard.
+    var color: Color { Color(hex: Fleet.palette(rawValue).hex) }
+    /// Stale/ended rows are dimmed as a whole.
+    var dimming: Double { Fleet.palette(rawValue).opacity }
 
     var label: String {
         switch self {
         case .working: "working"
         case .needsPermission: "needs permission"
-        case .needsAttention: "needs attention"
+        case .needsAttention: "your turn"
         case .done: "done"
         case .ended: "ended"
         case .stale: "stale"
@@ -81,6 +74,41 @@ struct EqualizerBars: View {
                 }
             }
             .frame(width: 18, height: 14)
+        }
+    }
+}
+
+// MARK: - Pixel sprite
+
+/// The dashboard's crab mascot (NotchCore `Sprite`), body filled with the state
+/// colour. Ticks every 0.5 s; static states don't animate, and TimelineView
+/// stops ticking while the view is off screen.
+struct PixelSprite: View {
+    let state: SessionState
+    /// Points per sprite pixel; whole numbers keep the pixels crisp.
+    var scale: CGFloat = 2
+
+    var body: some View {
+        let body = state.color
+        TimelineView(.animation(minimumInterval: 0.5, paused: state == .stale || state == .ended)) { context in
+            let frame = Int(context.date.timeIntervalSinceReferenceDate / 0.5)
+            Canvas { ctx, _ in
+                for px in Sprite.pixels(state: state.rawValue, frame: frame) {
+                    let rect = CGRect(x: CGFloat(px.x) * scale, y: CGFloat(px.y) * scale, width: scale, height: scale)
+                    ctx.fill(Path(rect), with: .color(Self.color(px.role, body: body)),
+                             style: FillStyle(antialiased: false))
+                }
+            }
+        }
+        .frame(width: CGFloat(Sprite.width) * scale, height: CGFloat(Sprite.height) * scale)
+    }
+
+    private static func color(_ role: Sprite.Role, body: Color) -> Color {
+        switch role {
+        case .body: body
+        case .dark: Color(hex: 0x0B0C0F)
+        case .pupil: .white
+        case .highlight: Color(hex: 0xC4B5FD)
         }
     }
 }
@@ -150,13 +178,30 @@ struct AgentBadge: View {
 struct CompactLeadingView: View {
     @ObservedObject var model: AppModel
 
+    private static let maxSprites = 6
+
     var body: some View {
-        HStack(spacing: 4) {
-            EqualizerBars(active: model.workingCount > 0)
-            Text(model.workingCount > 0 ? "\(model.workingCount)" : "idle")
-                .font(.caption.weight(.semibold))
-                .monospacedDigit()
-                .foregroundStyle(model.workingCount > 0 ? .white : .secondary)
+        let sessions = Fleet.sorted(model.visibleSessions, state: \.state.rawValue, updatedAt: \.updatedAt)
+        if sessions.isEmpty {
+            HStack(spacing: 4) {
+                EqualizerBars(active: model.workingCount > 0)
+                Text(model.workingCount > 0 ? "\(model.workingCount)" : "idle")
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(model.workingCount > 0 ? .white : .secondary)
+            }
+        } else {
+            HStack(spacing: 2) {
+                ForEach(sessions.prefix(Self.maxSprites)) { session in
+                    PixelSprite(state: session.state, scale: 1)
+                }
+                if sessions.count > Self.maxSprites {
+                    Text("+\(sessions.count - Self.maxSprites)")
+                        .font(.system(size: 9, weight: .semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
         // Expansion is handled by the app-wide click monitor covering the whole notch.
     }
@@ -265,10 +310,10 @@ struct ExpandedView: View {
         return all.filter { focusKeys.contains($0.key) }
     }
 
+    /// Grouped by machine; within one, what needs Tam first (same as the dashboard).
     private var machines: [(name: String, sessions: [Session])] {
-        Dictionary(grouping: focusedSessions, by: \.machine)
-            .map { (name: $0.key, sessions: $0.value) }
-            .sorted { $0.name < $1.name }
+        Fleet.grouped(focusedSessions, machine: \.machine, state: \.state.rawValue, updatedAt: \.updatedAt)
+            .map { (name: $0.machine, sessions: $0.items) }
     }
 
     var body: some View {
@@ -306,7 +351,7 @@ struct ExpandedView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 5) {
                         ForEach(machines, id: \.name) { machine in
-                            Text(machine.name.uppercased())
+                            Text("\(machine.name.uppercased()) · \(machine.sessions.count)")
                                 .font(.system(size: 9, weight: .bold))
                                 .tracking(1.2)
                                 .foregroundStyle(.secondary)
@@ -351,6 +396,12 @@ struct ExpandedView: View {
             EqualizerBars(active: model.workingCount > 0)
             Text("\(model.workingCount) working")
                 .font(.caption.weight(.semibold))
+                .monospacedDigit()
+            Text("·")
+                .foregroundStyle(.secondary)
+            Text("\(model.attentionCount) need you")
+                .font(.caption.weight(model.attentionCount > 0 ? .semibold : .regular))
+                .foregroundStyle(model.attentionCount > 0 ? SessionState.needsPermission.color : .secondary)
                 .monospacedDigit()
             Text("·")
                 .foregroundStyle(.secondary)
@@ -943,55 +994,58 @@ struct DiffView: View {
 struct SessionRow: View {
     let session: Session
 
-    private var subtitle: String? {
-        if let message = session.lastMessage { return "You: \(message)" }
-        return session.lastTool
+    /// Dashboard layout: last message (or the tool), then the agent (+ tool).
+    private var detail: String? {
+        session.lastMessage ?? session.lastTool.map { "tool: \($0)" }
+    }
+
+    private var agentLine: String {
+        guard let tool = session.lastTool, session.lastMessage != nil else { return session.agent }
+        return "\(session.agent) · \(tool)"
     }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 7) {
-            ZStack {
-                AgentBadge(agent: session.agent, dimmed: session.state != .working)
-                if session.state != .working {
-                    Image(systemName: session.state.icon)
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(session.state.color)
-                        .offset(x: 8, y: 8)
-                }
-            }
-            .frame(width: 21)
+        let tint = session.state.color
+        HStack(alignment: .center, spacing: 9) {
+            PixelSprite(state: session.state, scale: 2)
 
             VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 5) {
-                    Text(session.projectName)
-                        .font(.system(.callout, design: .rounded).weight(.medium))
-                    if session.state == .working {
-                        EqualizerBars(active: true)
-                            .scaleEffect(0.7)
-                    } else {
-                        Text(session.state.label)
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(session.state.color)
-                    }
-                    Spacer()
-                    Text(session.updatedDate, style: .relative)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                Text(session.projectName)
+                    .font(.system(.callout, design: .monospaced).weight(.semibold))
+                    .lineLimit(1)
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    let age = Fleet.age(sinceMs: session.updatedAt, nowMs: context.date.timeIntervalSince1970 * 1000)
+                    Text("\(session.state.label.uppercased()) · \(age)")
                 }
-                if let subtitle {
-                    Text(subtitle)
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .foregroundStyle(tint)
+                if let detail {
+                    Text(detail)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        .lineLimit(2)
                 }
+                Text(agentLine)
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 4)
+        .padding(.leading, 11)
+        .padding(.trailing, 9)
+        .padding(.vertical, 6)
         .background(
             RoundedRectangle(cornerRadius: 7)
                 .fill(cardBackground)
-                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(.white.opacity(0.05), lineWidth: 1))
+                .overlay(alignment: .leading) { Rectangle().fill(tint).frame(width: 3) }
+                .clipShape(RoundedRectangle(cornerRadius: 7))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7)
+                        .strokeBorder(session.state.needsUser ? tint : .white.opacity(0.05), lineWidth: 1)
+                )
         )
+        .opacity(session.state.dimming)
     }
 }

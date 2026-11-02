@@ -6,6 +6,7 @@ import NotchCore
 final class AppModel: ObservableObject {
     enum ConnectionState: String {
         case connecting, connected, disconnected
+        case unauthorized  // server rejected the operator token (HTTP 401 on /ws)
     }
 
     enum Mode {
@@ -59,6 +60,7 @@ final class AppModel: ObservableObject {
     private var task: URLSessionWebSocketTask?
     private var reconnectTask: Task<Void, Never>?
     private var pingTask: Task<Void, Never>?
+    private var reconnectAttempt = 0
 
     // MARK: Derived state
 
@@ -130,6 +132,7 @@ final class AppModel: ObservableObject {
         staleAfterMs = config.staleMinutes * 60 * 1000
         retainFinishedMs = config.retainHours * 60 * 60 * 1000
         serverDescription = config.server
+        reconnectAttempt = 0
         checkForUpdates()
 
         guard let url = URL(string: config.server),
@@ -279,7 +282,8 @@ final class AppModel: ObservableObject {
             return
         }
 
-        connection = .connecting
+        // Keep showing "unauthorized" across retries rather than flickering to "connecting".
+        if connection != .unauthorized { connection = .connecting }
         let socket = URLSession.shared.webSocketTask(with: url)
         task = socket
         socket.resume()
@@ -307,6 +311,7 @@ final class AppModel: ObservableObject {
                     self.scheduleReconnect(for: socket)
                 case .success(let message):
                     self.connection = .connected
+                    self.reconnectAttempt = 0
                     if case .string(let text) = message { self.handle(text) }
                     self.receive(on: socket)
                 }
@@ -317,8 +322,10 @@ final class AppModel: ObservableObject {
     /// Retries connect() when config was unusable — self-heals once ~/.notch/env is fixed.
     private func retryConnectLater() {
         reconnectTask?.cancel()
+        let delay = Backoff.delay(attempt: reconnectAttempt)
+        reconnectAttempt += 1
         reconnectTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(3))
+            try? await Task.sleep(for: .seconds(delay))
             guard !Task.isCancelled else { return }
             self?.connect()
         }
@@ -328,13 +335,11 @@ final class AppModel: ObservableObject {
         guard task === socket else { return }
         task = nil
         pingTask?.cancel()
-        connection = .disconnected
-        reconnectTask?.cancel()
-        reconnectTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(3))
-            guard !Task.isCancelled else { return }
-            self?.connect()
-        }
+        // A 401 means a wrong/missing operator token — say so instead of a bare
+        // "disconnected"; keep retrying (with backoff) so a fixed env self-heals.
+        let status = (socket.response as? HTTPURLResponse)?.statusCode
+        connection = status == 401 ? .unauthorized : .disconnected
+        retryConnectLater()
     }
 
     // MARK: Message handling
