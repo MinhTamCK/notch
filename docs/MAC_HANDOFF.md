@@ -5,7 +5,7 @@ You are Claude Code on Tam's Mac. Read this whole file first. Do the work in thi
 ## What already exists (done on the NUC, tested)
 
 - A **central headless server** runs on the NUC (a Linux VM on the tailnet) at `http://100.82.132.78:4519`, bound ONLY to that Tailscale IP, started by systemd user unit `notch-server`. Source: `server/` in this repo (Node/TS, Hono + ws). Added in commit `1b7274e`: `NOTCH_HOST` bind + static web dashboard.
-- **Reference UI**: `server/public/index.html` is a working web dashboard (open `http://100.82.132.78:4519/dashboard/`, token = operator token). Screenshot: `docs/demo-dashboard.png`. It is the visual spec for the Swift UI — same colours, same sprite, same grouping.
+- **Reference UI**: `server/public/index.html` is a working web dashboard (open `http://100.82.132.78:4519/dashboard/`, token = operator token). Screenshot: `docs/demo-dashboard.png`; animation (4 frames, 0.5 s each, loops): `docs/demo-animation.gif`. It is the visual spec for the Swift UI — same colours, same sprite, same grouping.
 - Hooks on each machine (the NUC already, panda VM + Macs next) POST to the NUC with the *machine* token. The Mac app must be a **viewer/operator** of that server, not host its own.
 
 ## Privacy model (do not weaken)
