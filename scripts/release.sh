@@ -47,4 +47,6 @@ NOTES="Remote Claude Code, Codex and Cursor monitor in your Mac's notch — live
 
 **Settings** (gear icon in the notch panel) — Launch at Login, keep awake with the lid closed, \"your turn\" alerts, reconnect. The speaker icon in the header toggles sound."
 
-gh release create "v$VERSION" "$ZIP" --title "Notch v$VERSION" --notes "$NOTES"
+# RELEASE_FLAGS: extra gh flags, e.g. "--prerelease --target nuc-server" for a branch build.
+# shellcheck disable=SC2086
+gh release create "v$VERSION" "$ZIP" --title "Notch v$VERSION" --notes "$NOTES" ${RELEASE_FLAGS:-}
