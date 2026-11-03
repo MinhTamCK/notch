@@ -1,11 +1,11 @@
-import { Hono } from 'hono'
+import { Hono, type Context, type MiddlewareHandler } from 'hono'
 import { serve } from '@hono/node-server'
 import { WebSocketServer, WebSocket } from 'ws'
 import type { Server } from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Store, type Decision } from './state.js'
-import { allowedSource, authorizeRole } from './net.js'
+import { allowedSource, principalFor, parseMachineTokens, type Principal } from './net.js'
 import { serveStatic } from '@hono/node-server/serve-static'
 
 const PORT = Number(process.env.NOTCH_PORT ?? 4519)
@@ -17,6 +17,15 @@ const TOKEN = process.env.NOTCH_TOKEN ?? ''
 // Operator role: list sessions, open the dashboard WebSocket, decide permissions.
 // Falls back to the machine token only if unset (single-token compatibility mode).
 const OPERATOR_TOKEN = process.env.NOTCH_OPERATOR_TOKEN || TOKEN
+// Per-machine tokens for hosts other people can log into (e.g. a shared VM): a holder
+// can only report as that one machine and read its own decisions. See parseMachineTokens.
+const MACHINE_TOKENS = parseMachineTokens(process.env.NOTCH_MACHINE_TOKENS ?? '', [TOKEN, OPERATOR_TOKEN])
+// Set (always overwritten) by the relay connector on requests that came from the internet.
+const RELAY_HEADER = 'x-notch-relay'
+// Limits for per-machine tokens, so a shared host can't flood the dashboard or the disk.
+const MAX_SESSIONS_PER_MACHINE = 50
+const MAX_PENDING_PER_MACHINE = 20
+const MAX_REQUESTS_PER_MINUTE = 300
 const MAX_WAIT_SEC = 120
 const MAX_BODY_BYTES = 256 * 1024
 
@@ -27,10 +36,11 @@ if (!TOKEN || TOKEN === 'dev-token' || TOKEN.length < 16) {
   process.exit(1)
 }
 
-const dataDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'data')
+const dataDir = process.env.NOTCH_DATA_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'data')
 const store = new Store(dataDir)
 
-const app = new Hono()
+type Env = { Variables: { principal: Principal } }
+const app = new Hono<Env>()
 
 app.use('*', async (c, next) => {
   const socket = (c.env as { incoming?: { socket?: { remoteAddress?: string } } })?.incoming?.socket
@@ -46,12 +56,18 @@ app.use('/dashboard/*', serveStatic({ root: './public', rewriteRequestPath: p =>
 app.get('/dashboard', c => c.redirect('/dashboard/'))
 
 /** Bearer-token check for a given role. Operator implies machine rights. */
-function requireRole(role: 'machine' | 'operator') {
-  return async (c: Parameters<Parameters<typeof app.use>[1]>[0], next: () => Promise<void>) => {
-    const tokens = { machineToken: TOKEN, operatorToken: OPERATOR_TOKEN }
-    if (!authorizeRole(c.req.header('authorization'), role, tokens)) {
+function requireRole(role: 'machine' | 'operator'): MiddlewareHandler<Env> {
+  return async (c, next) => {
+    const tokens = { machineToken: TOKEN, operatorToken: OPERATOR_TOKEN, machineTokens: MACHINE_TOKENS }
+    const viaRelay = c.req.header(RELAY_HEADER) !== undefined
+    const principal = principalFor(c.req.header('authorization'), tokens, viaRelay)
+    if (!principal || (role === 'operator' && principal.role !== 'operator')) {
       return c.json({ error: 'unauthorized' }, 401)
     }
+    if (principal.role === 'machine' && principal.machine && !withinRate(principal.machine)) {
+      return c.json({ error: 'too many requests' }, 429)
+    }
+    c.set('principal', principal)
     // Cap body size before any handler reads it (Content-Length + chunked fallback).
     const len = Number(c.req.header('content-length') ?? 0)
     if (len > MAX_BODY_BYTES) return c.json({ error: 'payload too large' }, 413)
@@ -63,20 +79,61 @@ function requireRole(role: 'machine' | 'operator') {
   }
 }
 
+/** The machine a per-machine token is pinned to, or undefined for the shared tokens. */
+function boundMachine(c: Context<Env>): string | undefined {
+  const p = c.get('principal')
+  return p.role === 'machine' ? p.machine : undefined
+}
+
+const requestsThisMinute = new Map<string, { minute: number; count: number }>()
+function withinRate(machine: string): boolean {
+  const minute = Math.floor(Date.now() / 60_000)
+  const r = requestsThisMinute.get(machine)
+  if (!r || r.minute !== minute) {
+    requestsThisMinute.set(machine, { minute, count: 1 })
+    return true
+  }
+  return ++r.count <= MAX_REQUESTS_PER_MINUTE
+}
+
+/**
+ * Pin a per-machine token's payload to its machine, and keep it under its caps.
+ * Returns the envelope to store, or an error response.
+ */
+function pinned(body: unknown, machine: string | undefined, opensPermission: boolean) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return { error: 'bad body' as const }
+  const env = body as { machine?: unknown; event?: { session_id?: unknown } }
+  if (!machine) return { env }
+  const sessions = [...store.sessions.values()].filter(s => s.machine === machine)
+  const known = sessions.some(s => s.sessionId === env.event?.session_id)
+  if (!known && sessions.length >= MAX_SESSIONS_PER_MACHINE) return { error: 'too many sessions' as const }
+  if (opensPermission) {
+    const pending = [...store.permissions.values()].filter(p => p.machine === machine && !p.decision)
+    if (pending.length >= MAX_PENDING_PER_MACHINE) return { error: 'too many pending permissions' as const }
+  }
+  return { env: { ...env, machine } }
+}
+
 app.post('/api/events', requireRole('machine'), async c => {
-  const session = store.handleEvent(await c.req.json())
+  const p = pinned(await c.req.json(), boundMachine(c), false)
+  if ('error' in p) return c.json({ error: p.error }, p.error === 'bad body' ? 400 : 429)
+  const session = store.handleEvent(p.env as never)
   if (!session) return c.json({ error: 'missing machine or session_id' }, 400)
   return c.json({ ok: true })
 })
 
 app.post('/api/permissions', requireRole('machine'), async c => {
-  const req = store.createPermission(await c.req.json())
+  const p = pinned(await c.req.json(), boundMachine(c), true)
+  if ('error' in p) return c.json({ error: p.error }, p.error === 'bad body' ? 400 : 429)
+  const req = store.createPermission(p.env as never)
   if (!req) return c.json({ error: 'missing machine, session_id or tool_name' }, 400)
   return c.json({ id: req.id })
 })
 
 // Statusline scripts report the account's plan usage (5h/7d rate limits).
 app.post('/api/usage', requireRole('machine'), async c => {
+  // Plan usage is the operator's own account; a per-machine host has no say in it.
+  if (boundMachine(c)) return c.json({ error: 'forbidden' }, 403)
   const body = await c.req.json<{ rate_limits?: unknown }>()
   const usage = store.setUsage(body.rate_limits)
   if (!usage) return c.json({ error: 'bad rate_limits' }, 400)
@@ -85,6 +142,11 @@ app.post('/api/usage', requireRole('machine'), async c => {
 
 app.get('/api/permissions/:id/decision', requireRole('machine'), async c => {
   const waitSec = Math.min(Number(c.req.query('wait') ?? 0), MAX_WAIT_SEC)
+  // A per-machine token may only wait on its own requests (and so can't time out others').
+  const machine = boundMachine(c)
+  if (machine && store.permissions.get(c.req.param('id'))?.machine !== machine) {
+    return c.json({ error: 'unknown permission id' }, 404)
+  }
   const pending = store.waitForDecision(c.req.param('id'), waitSec * 1000)
   if (!pending) return c.json({ error: 'unknown permission id' }, 404)
   const req = await pending
@@ -133,7 +195,7 @@ const wss = new WebSocketServer({ noServer: true })
 server.on('upgrade', (req, socket, head) => {
   if (!allowedSource(req.socket.remoteAddress)) return socket.destroy()
   const url = new URL(req.url ?? '', 'http://localhost')
-  if (url.pathname !== '/ws') return socket.destroy()
+  if (url.pathname !== '/ws' || req.headers[RELAY_HEADER] !== undefined) return socket.destroy()
   // The dashboard WebSocket (snapshots + decide) is operator-only.
   if (url.searchParams.get('token') !== OPERATOR_TOKEN) {
     socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n')

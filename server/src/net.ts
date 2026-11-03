@@ -1,20 +1,55 @@
 // Auth + network policy, kept pure and side-effect-free so they are unit-testable.
 
+export interface Tokens {
+  machineToken: string
+  operatorToken: string
+  /** Per-machine tokens (token → machine name) for hosts that are not fully trusted. */
+  machineTokens?: Map<string, string>
+}
+
 /**
- * Bearer-token authorization for a given role. Operator implies machine rights.
+ * Who a bearer token belongs to. A per-machine token is a machine role pinned to one
+ * machine name: whatever `machine` its payload claims, it reports as that machine.
+ * Requests that came in over the internet relay (`viaRelay`) may use only per-machine
+ * tokens, so the shared machine and operator tokens never work from outside the tailnet.
  * Empty tokens never authorize (defends against a misconfigured blank secret).
  */
-export function authorizeRole(
-  authHeader: string | undefined,
-  role: 'machine' | 'operator',
-  tokens: { machineToken: string; operatorToken: string },
-): boolean {
-  if (!authHeader?.startsWith('Bearer ')) return false
+export type Principal = { role: 'operator' } | { role: 'machine'; machine?: string }
+
+export function principalFor(authHeader: string | undefined, tokens: Tokens, viaRelay = false): Principal | undefined {
+  if (!authHeader?.startsWith('Bearer ')) return undefined
   const token = authHeader.slice(7)
-  if (!token) return false
-  if (tokens.operatorToken && token === tokens.operatorToken) return true
-  if (role === 'machine' && tokens.machineToken && token === tokens.machineToken) return true
-  return false
+  if (!token) return undefined
+  const bound = tokens.machineTokens?.get(token)
+  if (bound) return { role: 'machine', machine: bound }
+  if (viaRelay) return undefined
+  if (tokens.operatorToken && token === tokens.operatorToken) return { role: 'operator' }
+  if (tokens.machineToken && token === tokens.machineToken) return { role: 'machine' }
+  return undefined
+}
+
+/** Bearer-token authorization for a given role. Operator implies machine rights. */
+export function authorizeRole(authHeader: string | undefined, role: 'machine' | 'operator', tokens: Tokens): boolean {
+  const p = principalFor(authHeader, tokens)
+  return !!p && (p.role === 'operator' || role === 'machine')
+}
+
+/**
+ * NOTCH_MACHINE_TOKENS="panda=<token>,other=<token>" → token → machine name.
+ * Throws on anything malformed so the server refuses to start rather than run open.
+ */
+export function parseMachineTokens(raw: string, shared: string[] = []): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const entry of raw.split(',').map(s => s.trim()).filter(Boolean)) {
+    const eq = entry.indexOf('=')
+    const machine = eq > 0 ? entry.slice(0, eq) : ''
+    const token = entry.slice(eq + 1)
+    if (!/^[a-z0-9][a-z0-9-]{0,31}$/.test(machine)) throw new Error('NOTCH_MACHINE_TOKENS: bad machine name')
+    if (token.length < 16) throw new Error(`NOTCH_MACHINE_TOKENS: token for ${machine} is too short`)
+    if (shared.includes(token) || out.has(token)) throw new Error(`NOTCH_MACHINE_TOKENS: token for ${machine} is reused`)
+    out.set(token, machine)
+  }
+  return out
 }
 
 // Network source policy, kept pure and side-effect-free so it is unit-testable.

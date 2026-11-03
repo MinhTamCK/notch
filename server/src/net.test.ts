@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { allowedSource, authorizeRole } from './net.js'
+import { allowedSource, authorizeRole, principalFor, parseMachineTokens } from './net.js'
 
 describe('authorizeRole', () => {
   const tokens = { machineToken: 'machine-secret-123456', operatorToken: 'operator-secret-654321' }
@@ -67,5 +67,43 @@ describe('allowedSource', () => {
     expect(allowedSource('not-an-ip')).toBe(false)
     expect(allowedSource('100.64')).toBe(false)
     expect(allowedSource('100.999.0.1')).toBe(false)
+  })
+})
+
+describe('per-machine tokens', () => {
+  const panda = 'panda-secret-abcdef123'
+  const tokens = {
+    machineToken: 'machine-secret-123456',
+    operatorToken: 'operator-secret-654321',
+    machineTokens: new Map([[panda, 'panda']]),
+  }
+
+  it('a per-machine token is a machine role pinned to its machine, never operator', () => {
+    expect(principalFor(`Bearer ${panda}`, tokens)).toEqual({ role: 'machine', machine: 'panda' })
+    expect(authorizeRole(`Bearer ${panda}`, 'machine', tokens)).toBe(true)
+    expect(authorizeRole(`Bearer ${panda}`, 'operator', tokens)).toBe(false)
+  })
+
+  it('over the relay only per-machine tokens count', () => {
+    expect(principalFor(`Bearer ${panda}`, tokens, true)).toEqual({ role: 'machine', machine: 'panda' })
+    expect(principalFor(`Bearer ${tokens.machineToken}`, tokens, true)).toBeUndefined()
+    expect(principalFor(`Bearer ${tokens.operatorToken}`, tokens, true)).toBeUndefined()
+  })
+
+  it('shared tokens keep working on the tailnet, unpinned', () => {
+    expect(principalFor(`Bearer ${tokens.machineToken}`, tokens)).toEqual({ role: 'machine' })
+    expect(principalFor(`Bearer ${tokens.operatorToken}`, tokens)).toEqual({ role: 'operator' })
+  })
+
+  it('parses NOTCH_MACHINE_TOKENS and refuses anything malformed or reused', () => {
+    expect(parseMachineTokens('')).toEqual(new Map())
+    expect(parseMachineTokens(` panda=${panda} , box-2=other-secret-123456`)).toEqual(
+      new Map([[panda, 'panda'], ['other-secret-123456', 'box-2']]),
+    )
+    expect(() => parseMachineTokens('panda=short')).toThrow()
+    expect(() => parseMachineTokens(`Panda=${panda}`)).toThrow()
+    expect(() => parseMachineTokens(panda)).toThrow()
+    expect(() => parseMachineTokens(`a=${panda},b=${panda}`)).toThrow()
+    expect(() => parseMachineTokens(`panda=${tokens.machineToken}`, [tokens.machineToken])).toThrow()
   })
 })
