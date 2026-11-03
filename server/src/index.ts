@@ -20,6 +20,13 @@ const OPERATOR_TOKEN = process.env.NOTCH_OPERATOR_TOKEN || TOKEN
 // Per-machine tokens for hosts other people can log into (e.g. a shared VM): a holder
 // can only report as that one machine and read its own decisions. See parseMachineTokens.
 const MACHINE_TOKENS = parseMachineTokens(process.env.NOTCH_MACHINE_TOKENS ?? '', [TOKEN, OPERATOR_TOKEN])
+// Extra operator tokens, one per viewing device (e.g. "mac-work=<token>"), so a less
+// trusted device can be cut off by deleting its entry without rotating anything else.
+const OPERATOR_TOKENS = parseMachineTokens(
+  process.env.NOTCH_OPERATOR_TOKENS ?? '',
+  [TOKEN, OPERATOR_TOKEN, ...MACHINE_TOKENS.keys()],
+  'NOTCH_OPERATOR_TOKENS',
+)
 // Set (always overwritten) by the relay connector on requests that came from the internet.
 const RELAY_HEADER = 'x-notch-relay'
 // Limits for per-machine tokens, so a shared host can't flood the dashboard or the disk.
@@ -58,7 +65,7 @@ app.get('/dashboard', c => c.redirect('/dashboard/'))
 /** Bearer-token check for a given role. Operator implies machine rights. */
 function requireRole(role: 'machine' | 'operator'): MiddlewareHandler<Env> {
   return async (c, next) => {
-    const tokens = { machineToken: TOKEN, operatorToken: OPERATOR_TOKEN, machineTokens: MACHINE_TOKENS }
+    const tokens = { machineToken: TOKEN, operatorToken: OPERATOR_TOKEN, machineTokens: MACHINE_TOKENS, operatorTokens: OPERATOR_TOKENS }
     const viaRelay = c.req.header(RELAY_HEADER) !== undefined
     const principal = principalFor(c.req.header('authorization'), tokens, viaRelay)
     if (!principal || (role === 'operator' && principal.role !== 'operator')) {
@@ -197,7 +204,8 @@ server.on('upgrade', (req, socket, head) => {
   const url = new URL(req.url ?? '', 'http://localhost')
   if (url.pathname !== '/ws' || req.headers[RELAY_HEADER] !== undefined) return socket.destroy()
   // The dashboard WebSocket (snapshots + decide) is operator-only.
-  if (url.searchParams.get('token') !== OPERATOR_TOKEN) {
+  const token = url.searchParams.get('token') ?? ''
+  if (token !== OPERATOR_TOKEN && !OPERATOR_TOKENS.has(token)) {
     socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n')
     return socket.destroy()
   }

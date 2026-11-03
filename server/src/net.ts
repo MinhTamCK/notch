@@ -5,6 +5,8 @@ export interface Tokens {
   operatorToken: string
   /** Per-machine tokens (token → machine name) for hosts that are not fully trusted. */
   machineTokens?: Map<string, string>
+  /** Extra operator tokens (token → device name), each revocable on its own. */
+  operatorTokens?: Map<string, string>
 }
 
 /**
@@ -24,6 +26,7 @@ export function principalFor(authHeader: string | undefined, tokens: Tokens, via
   if (bound) return { role: 'machine', machine: bound }
   if (viaRelay) return undefined
   if (tokens.operatorToken && token === tokens.operatorToken) return { role: 'operator' }
+  if (tokens.operatorTokens?.has(token)) return { role: 'operator' }
   if (tokens.machineToken && token === tokens.machineToken) return { role: 'machine' }
   return undefined
 }
@@ -35,18 +38,19 @@ export function authorizeRole(authHeader: string | undefined, role: 'machine' | 
 }
 
 /**
- * NOTCH_MACHINE_TOKENS="panda=<token>,other=<token>" → token → machine name.
+ * NOTCH_MACHINE_TOKENS="panda=<token>,other=<token>" → token → machine name
+ * (also NOTCH_OPERATOR_TOKENS, keyed by device name).
  * Throws on anything malformed so the server refuses to start rather than run open.
  */
-export function parseMachineTokens(raw: string, shared: string[] = []): Map<string, string> {
+export function parseMachineTokens(raw: string, shared: string[] = [], envName = 'NOTCH_MACHINE_TOKENS'): Map<string, string> {
   const out = new Map<string, string>()
   for (const entry of raw.split(',').map(s => s.trim()).filter(Boolean)) {
     const eq = entry.indexOf('=')
     const machine = eq > 0 ? entry.slice(0, eq) : ''
     const token = entry.slice(eq + 1)
-    if (!/^[a-z0-9][a-z0-9-]{0,31}$/.test(machine)) throw new Error('NOTCH_MACHINE_TOKENS: bad machine name')
-    if (token.length < 16) throw new Error(`NOTCH_MACHINE_TOKENS: token for ${machine} is too short`)
-    if (shared.includes(token) || out.has(token)) throw new Error(`NOTCH_MACHINE_TOKENS: token for ${machine} is reused`)
+    if (!/^[a-z0-9][a-z0-9-]{0,31}$/.test(machine)) throw new Error(`${envName}: bad name`)
+    if (token.length < 16) throw new Error(`${envName}: token for ${machine} is too short`)
+    if (shared.includes(token) || out.has(token)) throw new Error(`${envName}: token for ${machine} is reused`)
     out.set(token, machine)
   }
   return out

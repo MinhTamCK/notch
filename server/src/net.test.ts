@@ -90,6 +90,12 @@ describe('per-machine tokens', () => {
     expect(principalFor(`Bearer ${tokens.operatorToken}`, tokens, true)).toBeUndefined()
   })
 
+  it('a named operator token is an operator on the tailnet, never via the relay', () => {
+    const t = { ...tokens, operatorTokens: new Map([['work-secret-1234567890', 'mac-work']]) }
+    expect(principalFor('Bearer work-secret-1234567890', t)).toEqual({ role: 'operator' })
+    expect(principalFor('Bearer work-secret-1234567890', t, true)).toBeUndefined()
+  })
+
   it('shared tokens keep working on the tailnet, unpinned', () => {
     expect(principalFor(`Bearer ${tokens.machineToken}`, tokens)).toEqual({ role: 'machine' })
     expect(principalFor(`Bearer ${tokens.operatorToken}`, tokens)).toEqual({ role: 'operator' })

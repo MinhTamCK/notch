@@ -12,6 +12,7 @@ const BASE = `http://127.0.0.1:${PORT}`
 const MACHINE = 'machine-secret-1234567890'
 const OPERATOR = 'operator-secret-1234567890'
 const PANDA = 'panda-secret-1234567890'
+const WORK = 'work-operator-secret-1234567890'
 let server: ChildProcess
 
 function call(method: string, p: string, token: string, body?: unknown, relay = false) {
@@ -60,6 +61,7 @@ beforeAll(async () => {
       NOTCH_TOKEN: MACHINE,
       NOTCH_OPERATOR_TOKEN: OPERATOR,
       NOTCH_MACHINE_TOKENS: `panda=${PANDA}`,
+      NOTCH_OPERATOR_TOKENS: `mac-work=${WORK}`,
       NOTCH_DATA_DIR: mkdtempSync(path.join(tmpdir(), 'notch-e2e-')),
     },
     stdio: 'ignore',
@@ -132,6 +134,21 @@ describe('requests marked as coming through the relay', () => {
   it('never open the dashboard WebSocket', async () => {
     expect(await wsOpens()).toBe(true)
     expect(await wsOpens({ 'x-notch-relay': '1' })).toBe(false)
+  })
+})
+
+describe('named operator token (mac-work)', () => {
+  it('can view, decide and open the dashboard WebSocket on the tailnet', async () => {
+    expect((await call('GET', '/api/sessions', WORK)).status).toBe(200)
+    const r = await call('POST', '/api/permissions', WORK, permission('mac-work', 'work-1'))
+    const { id } = (await r.json()) as { id: string }
+    expect((await call('POST', `/api/permissions/${id}/decide`, WORK, { decision: 'allow' })).status).toBe(200)
+    expect(await wsOpens({}, WORK)).toBe(true)
+  })
+
+  it('is refused through the relay', async () => {
+    expect((await call('GET', '/api/sessions', WORK, undefined, true)).status).toBe(401)
+    expect(await wsOpens({ 'x-notch-relay': '1' }, WORK)).toBe(false)
   })
 })
 
