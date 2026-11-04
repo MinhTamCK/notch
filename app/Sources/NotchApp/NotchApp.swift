@@ -8,7 +8,11 @@ struct NotchApp: App {
 
     var body: some Scene {
         // Everything lives in the notch panel (gear icon → settings); no menu bar item.
-        Settings { EmptyView() }
+        // SwiftUI needs one scene; an uninserted MenuBarExtra has no window, unlike
+        // `Settings { EmptyView() }`, which macOS opened as a blank "Notch Settings" window.
+        MenuBarExtra("Notch", systemImage: "rectangle.topthird.inset.filled", isInserted: .constant(false)) {
+            EmptyView()
+        }
     }
 }
 
